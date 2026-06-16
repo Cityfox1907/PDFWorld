@@ -102,7 +102,7 @@ export function ElementView({ el, pageId, scale, editing, onStartEdit, onEndEdit
       onPointerDown={startMove}
       onDoubleClick={() => el.type === 'text' && interactive && onStartEdit()}
     >
-      <ElementBody el={el} scale={scale} editing={editing} onEndEdit={onEndEdit} updateElement={updateElement} pageId={pageId} commit={commit} />
+      <ElementBody el={el} scale={scale} editing={editing} onEndEdit={onEndEdit} updateElement={updateElement} pageId={pageId} />
       {selected && !editing && (
         <>
           {HANDLES.map((h) => (
@@ -121,7 +121,6 @@ function ElementBody({
   onEndEdit,
   updateElement,
   pageId,
-  commit,
 }: {
   el: AnyElement;
   scale: number;
@@ -129,12 +128,13 @@ function ElementBody({
   onEndEdit: () => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   pageId: string;
-  commit: () => void;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     if (editing && taRef.current) {
       taRef.current.focus();
+      // Pre-select the content so existing text turns blue and a single keystroke
+      // replaces it — the caret is instantly ready for new fields too.
       taRef.current.select();
     }
   }, [editing]);
@@ -150,6 +150,9 @@ function ElementBody({
         color: t.color,
         textAlign: t.align,
         lineHeight: t.lineHeight,
+        // When this text replaces existing PDF text, paint the sampled background
+        // behind it so the original glyphs are hidden live in the editor too.
+        background: t.coverColor ?? undefined,
       };
       if (editing) {
         return (
@@ -158,12 +161,18 @@ function ElementBody({
             className="text-edit"
             style={textStyle}
             defaultValue={t.text}
-            onChange={(e) => updateElement(pageId, el.id, { text: e.target.value })}
-            onBlur={() => {
-              commit();
-              onEndEdit();
+            onChange={(e) => {
+              const grown = Math.max(el.height, e.currentTarget.scrollHeight / scale);
+              updateElement(pageId, el.id, { text: e.target.value, height: grown });
             }}
+            onBlur={onEndEdit}
             onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
           />
         );
       }

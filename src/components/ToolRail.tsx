@@ -72,7 +72,7 @@ export function ToolRail() {
           width: w,
           height: h,
           opacity: 1,
-          z: 1,
+          z: page.elements.reduce((m, e) => Math.max(m, e.z), 0) + 1,
           src,
           aspect,
         };

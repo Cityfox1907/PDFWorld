@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, visibleSize, type EditorPage } from '../state/store';
 import {
   renderPageToCanvas,
@@ -15,6 +15,11 @@ import { ElementView } from './ElementView';
 
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2.5);
 
+interface SampledColors {
+  cover: string;
+  text: string;
+}
+
 export function PageCanvas() {
   const pages = useStore((s) => s.pages);
   const currentPageId = useStore((s) => s.currentPageId);
@@ -26,6 +31,7 @@ export function PageCanvas() {
   const tool = useStore((s) => s.tool);
   const addElement = useStore((s) => s.addElement);
   const updateElement = useStore((s) => s.updateElement);
+  const deleteElement = useStore((s) => s.deleteElement);
   const commit = useStore((s) => s.commit);
   const selectElement = useStore((s) => s.selectElement);
   const setTool = useStore((s) => s.setTool);
@@ -39,10 +45,19 @@ export function PageCanvas() {
   const [draft, setDraft] = useState<AnyElement | null>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [editingRun, setEditingRun] = useState<number | null>(null);
+  const [scanId, setScanId] = useState(0);
+  const [editColors, setEditColors] = useState<SampledColors>({ cover: '#ffffff', text: '#111111' });
 
   const rotation = page ? (((page.baseRotation + page.addedRotation) % 360) + 360) % 360 : 0;
   const view = page ? visibleSize(page) : { width: 1, height: 1 };
   const scale = fitScale * zoom;
+
+  // Never carry a transient edit across a page switch.
+  const pageId = page?.id;
+  useEffect(() => {
+    setEditingId(null);
+    setEditingRun(null);
+  }, [pageId]);
 
   // Fit the page to the available area whenever the page or viewport changes.
   useLayoutEffect(() => {
@@ -90,9 +105,14 @@ export function PageCanvas() {
     };
   }, [engine, page, scale, rotation, view.width, view.height]);
 
-  // Load existing text runs when entering edit-text mode.
+  // Load existing text runs when entering edit-text mode. Depends on the page
+  // *source* (not its element list) so adding overlay edits never re-triggers a
+  // costly re-scan or wipes the line currently being edited.
+  const pageSourceKey = page?.sourceKey;
+  const pageSourceIndex = page?.sourceIndex;
+  const pageBlank = page?.blank ?? false;
   useEffect(() => {
-    if (activeTool !== 'edit-text' || !page || page.blank) {
+    if (activeTool !== 'edit-text' || pageSourceKey === undefined || pageSourceIndex === undefined || pageBlank) {
       setRuns([]);
       setEditingRun(null);
       return;
@@ -100,9 +120,13 @@ export function PageCanvas() {
     let cancelled = false;
     void (async () => {
       try {
-        const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
+        const pdfPage = await engine.getPage(pageSourceKey, pageSourceIndex);
         const r = await extractTextRuns(pdfPage, rotation);
-        if (!cancelled) setRuns(groupRunsIntoLines(r));
+        if (!cancelled) {
+          setRuns(groupRunsIntoLines(r));
+          setEditingRun(null);
+          setScanId((n) => n + 1); // replay the scan sweep once per real scan
+        }
       } catch {
         if (!cancelled) setRuns([]);
       }
@@ -110,7 +134,70 @@ export function PageCanvas() {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, engine, page, rotation]);
+  }, [activeTool, engine, pageSourceKey, pageSourceIndex, pageBlank, rotation]);
+
+  // ── zoom by Ctrl/⌘+wheel (also trackpad pinch) and two-finger touch pinch ──
+  const zoomAround = useCallback((clientX: number, clientY: number, factor: number) => {
+    const area = areaRef.current;
+    if (!area) return;
+    const st = useStore.getState();
+    const old = st.zoom;
+    const next = Math.max(0.25, Math.min(4, Number((old * factor).toFixed(2))));
+    if (next === old) return;
+    const rect = area.getBoundingClientRect();
+    const ax = clientX - rect.left + area.scrollLeft;
+    const ay = clientY - rect.top + area.scrollTop;
+    const ratio = next / old;
+    st.setZoom(next);
+    requestAnimationFrame(() => {
+      area.scrollLeft = ax * ratio - (clientX - rect.left);
+      area.scrollTop = ay * ratio - (clientY - rect.top);
+    });
+  }, []);
+
+  useEffect(() => {
+    const area = areaRef.current;
+    if (!area) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return; // plain wheel keeps scrolling the page
+      e.preventDefault();
+      zoomAround(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+    };
+
+    let pinchDist = 0;
+    const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const touchMid = (t: TouchList) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinchDist = touchDist(e.touches);
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchDist > 0) {
+        e.preventDefault();
+        const d = touchDist(e.touches);
+        if (d > 0 && Math.abs(d - pinchDist) > 1) {
+          const mid = touchMid(e.touches);
+          zoomAround(mid.x, mid.y, d / pinchDist);
+          pinchDist = d;
+        }
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchDist = 0;
+    };
+
+    area.addEventListener('wheel', onWheel, { passive: false });
+    area.addEventListener('touchstart', onTouchStart, { passive: false });
+    area.addEventListener('touchmove', onTouchMove, { passive: false });
+    area.addEventListener('touchend', onTouchEnd);
+    return () => {
+      area.removeEventListener('wheel', onWheel);
+      area.removeEventListener('touchstart', onTouchStart);
+      area.removeEventListener('touchmove', onTouchMove);
+      area.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [zoomAround]);
 
   const evToView = (e: { clientX: number; clientY: number }) => {
     const rect = overlayRef.current!.getBoundingClientRect();
@@ -124,6 +211,12 @@ export function PageCanvas() {
     const start = evToView(e);
 
     if (activeTool === 'select') {
+      // Clicking empty space discards an abandoned, never-filled text box.
+      const selId = useStore.getState().selectedElementId;
+      if (selId) {
+        const selEl = page.elements.find((e) => e.id === selId);
+        if (isAbandonedText(selEl)) deleteElement(page.id, selId);
+      }
       selectElement(null);
       return;
     }
@@ -133,8 +226,8 @@ export function PageCanvas() {
         type: 'text',
         x: start.x,
         y: start.y,
-        width: 220,
-        height: tool.textSize * 1.6,
+        width: 240,
+        height: Math.max(tool.textSize * 1.4, 22),
         opacity: 1,
         z: nextZ(page),
         text: '',
@@ -147,6 +240,10 @@ export function PageCanvas() {
         lineHeight: 1.3,
       };
       addElement(page.id, el);
+      // Switch to the select tool so the new field becomes interactive (a field
+      // created under the text tool would otherwise stay pointer-events:none) and
+      // jump straight into editing — the caret is ready, just start typing.
+      setTool('select');
       setEditingId(el.id);
       return;
     }
@@ -324,16 +421,40 @@ export function PageCanvas() {
     window.addEventListener('pointerup', up);
   };
 
-  // ── in-place text editing of existing PDF text ──
+  // ── starting / ending edits on overlay text elements ──
+  const startEditElement = (id: string) => {
+    commit(); // snapshot once before the edit so a single undo reverts the whole change
+    setEditingId(id);
+  };
+
+  // Leaving the textarea just exits edit mode — the box stays so the user can still
+  // tweak font/size in the inspector before typing. An abandoned empty box is only
+  // dropped when the user clicks an empty spot (see onOverlayPointerDown).
+  const endTextEdit = () => setEditingId(null);
+
+  /** An empty, never-filled new text box (not an in-place edit, which keeps its cover). */
+  const isAbandonedText = (el: AnyElement | undefined): boolean =>
+    !!el && el.type === 'text' && !el.text.trim() && !el.coverColor;
+
+  // ── in-place editing of existing PDF text (scan tool) ──
+  const beginRunEdit = (idx: number) => {
+    const run = runs[idx];
+    const canvas = canvasRef.current;
+    if (run && canvas) {
+      const box = { x: run.x, y: run.y, width: Math.max(run.width, 24), height: run.height };
+      setEditColors({
+        cover: sampleBackground(canvas, box, scale * DPR),
+        text: sampleTextColor(canvas, box, scale * DPR),
+      });
+    }
+    setEditingRun(idx);
+  };
+
   const commitRunEdit = (idx: number, newText: string) => {
     setEditingRun(null);
     const run = runs[idx];
     if (!run || !page) return;
-    if (newText === run.str) return;
-    const box = { x: run.x, y: run.y, width: run.width, height: run.height };
-    const canvas = canvasRef.current!;
-    const coverColor = sampleBackground(canvas, box, scale * DPR);
-    const color = sampleTextColor(canvas, box, scale * DPR);
+    if (newText === run.str) return; // unchanged — leave the original glyphs untouched
     const el: TextElement = {
       id: uid('el'),
       type: 'text',
@@ -348,13 +469,28 @@ export function PageCanvas() {
       size: run.fontSize,
       bold: run.bold,
       italic: run.italic,
-      color,
+      color: editColors.text,
       align: 'left',
       lineHeight: 1.15,
-      coverColor,
+      coverColor: editColors.cover, // hides the original glyphs on screen and on export
     };
     addElement(page.id, el);
   };
+
+  // A detected line is "consumed" once an in-place edit already covers it, so its
+  // clickable box never reappears (and a second edit can't stack on the first).
+  const runIsCovered = useCallback(
+    (run: TextRun) =>
+      !!page &&
+      page.elements.some(
+        (e) =>
+          e.type === 'text' &&
+          !!e.coverColor &&
+          Math.abs(e.x - run.x) <= 2 &&
+          Math.abs(e.y - run.y) <= Math.max(2, run.fontSize * 0.6),
+      ),
+    [page],
+  );
 
   if (!page) return <div className="canvas-area" ref={areaRef} />;
 
@@ -377,8 +513,8 @@ export function PageCanvas() {
               pageId={page.id}
               scale={scale}
               editing={editingId === el.id}
-              onStartEdit={() => setEditingId(el.id)}
-              onEndEdit={() => setEditingId(null)}
+              onStartEdit={() => startEditElement(el.id)}
+              onEndEdit={endTextEdit}
               updateElement={updateElement}
               commit={commit}
             />
@@ -388,18 +524,22 @@ export function PageCanvas() {
 
           {activeTool === 'edit-text' && (
             <>
-              {runs.length > 0 && editingRun === null && <div key={page.id} className="scan-sweep" />}
-              {runs.map((run, i) => (
-                <RunBox
-                  key={i}
-                  run={run}
-                  scale={scale}
-                  editing={editingRun === i}
-                  onEdit={() => setEditingRun(i)}
-                  onCommit={(text) => commitRunEdit(i, text)}
-                  onCancel={() => setEditingRun(null)}
-                />
-              ))}
+              {runs.length > 0 && <div key={scanId} className="scan-sweep" />}
+              {runs.map((run, i) => {
+                if (editingRun !== i && runIsCovered(run)) return null;
+                return (
+                  <RunBox
+                    key={i}
+                    run={run}
+                    scale={scale}
+                    editing={editingRun === i}
+                    colors={editColors}
+                    onEdit={() => beginRunEdit(i)}
+                    onCommit={(text) => commitRunEdit(i, text)}
+                    onCancel={() => setEditingRun(null)}
+                  />
+                );
+              })}
             </>
           )}
         </div>
@@ -435,11 +575,17 @@ function DraftView({ el, scale }: { el: AnyElement; scale: number }) {
   return <div className="draft" style={style} />;
 }
 
-/** Clickable box over an existing text run; becomes an input when editing. */
+/**
+ * Clickable box over an existing text run. Clicking turns it into an inline
+ * textarea pre-filled with the original text (all selected, ready to retype) that
+ * matches the font, size, style and colour and hides the original behind the
+ * sampled background — so the edit blends in seamlessly.
+ */
 function RunBox({
   run,
   scale,
   editing,
+  colors,
   onEdit,
   onCommit,
   onCancel,
@@ -447,14 +593,26 @@ function RunBox({
   run: TextRun;
   scale: number;
   editing: boolean;
+  colors: SampledColors;
   onEdit: () => void;
   onCommit: (text: string) => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(run.str);
-  useEffect(() => setValue(run.str), [run.str, editing]);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (editing) {
+      setValue(run.str);
+      // focus + select once on entering edit mode (not on every keystroke)
+      const ta = taRef.current;
+      if (ta) {
+        ta.focus();
+        ta.select();
+      }
+    }
+  }, [editing, run.str]);
 
-  const style: React.CSSProperties = {
+  const box: React.CSSProperties = {
     left: run.x * scale,
     top: run.y * scale,
     width: Math.max(run.width, 24) * scale,
@@ -463,22 +621,25 @@ function RunBox({
     fontSize: run.fontSize * scale,
     fontWeight: run.bold ? 700 : 400,
     fontStyle: run.italic ? 'italic' : 'normal',
+    lineHeight: 1.15,
   };
 
   if (editing) {
     return (
-      <input
+      <textarea
         className="run-input"
-        autoFocus
+        ref={taRef}
         value={value}
-        style={style}
+        style={{ ...box, color: colors.text, background: colors.cover }}
         onChange={(e) => setValue(e.target.value)}
         onBlur={() => onCommit(value)}
+        onPointerDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
+          if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             onCommit(value);
           } else if (e.key === 'Escape') {
+            e.preventDefault();
             onCancel();
           }
         }}
@@ -488,8 +649,11 @@ function RunBox({
   return (
     <div
       className="run-box"
-      style={style}
-      onPointerDown={onEdit}
+      style={box}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        onEdit();
+      }}
       title={`„${run.str}“ · ${Math.round(run.fontSize)} pt · klicken zum Bearbeiten`}
     >
       <span className="run-tag">{Math.round(run.fontSize)}</span>

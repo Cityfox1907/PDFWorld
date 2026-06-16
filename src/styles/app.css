@@ -444,6 +444,8 @@
   overflow: auto;
   background: var(--canvas-bg);
   position: relative;
+  /* allow one-finger panning; two-finger pinch is handled in JS for zoom */
+  touch-action: pan-x pan-y;
 }
 .canvas-stage {
   position: relative;
@@ -610,12 +612,14 @@ svg.draft {
   position: absolute;
   border: 1.5px solid var(--accent);
   border-radius: 3px;
-  background: var(--panel);
-  padding: 0 2px;
+  padding: 0 1px;
   margin: 0;
   outline: none;
   box-shadow: 0 4px 18px var(--accent-ring);
-  color: var(--text);
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Sweeping scan line that confirms the page has been analysed. */

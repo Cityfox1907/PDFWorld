@@ -79,6 +79,8 @@ interface StoreState {
   formFields: FormField[];
   formValues: Record<string, string | boolean | string[]>;
   flattenForm: boolean;
+  /** true when the PDF carries an XFA form pdf-lib cannot fill (helps the UI explain it) */
+  xfaForm: boolean;
 
   tool: ToolDefaults;
 
@@ -178,6 +180,7 @@ export const useStore = create<StoreState>((set, get) => ({
   formFields: [],
   formValues: {},
   flattenForm: false,
+  xfaForm: false,
 
   tool: { ...DEFAULT_TOOL },
 
@@ -209,6 +212,7 @@ export const useStore = create<StoreState>((set, get) => ({
         });
       }
       const formFields = engine.readFormFields();
+      const { hasXfa } = engine.formInfo();
       const formValues: Record<string, string | boolean | string[]> = {};
       for (const f of formFields) formValues[f.name] = f.value;
       set({
@@ -223,6 +227,7 @@ export const useStore = create<StoreState>((set, get) => ({
         formFields,
         formValues,
         flattenForm: false,
+        xfaForm: hasXfa && formFields.length === 0,
         past: [],
         future: [],
       });
@@ -280,6 +285,7 @@ export const useStore = create<StoreState>((set, get) => ({
       formFields: [],
       formValues: {},
       flattenForm: false,
+      xfaForm: false,
       past: [],
       future: [],
     });

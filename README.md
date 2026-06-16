@@ -13,15 +13,24 @@ die bestehenden Seiten eingezeichnet.
 - Mehrere PDFs **zusammenführen**
 - Seiten per **Drag & Drop sortieren**
 - Seiten **einfügen** (leer), **duplizieren**, **löschen**, **drehen**
+- **Übersicht zoomen** – Thumbnails stufenlos vergrössern, um direkt in die
+  Seitentexte hineinzuzoomen
 
 ### 2. Bearbeitung
-- **Bestehenden Text bearbeiten** – die Schrift wird automatisch erkannt, der
-  Hintergrund hinter dem Original wird abgetastet und sauber überdeckt
+- **Text scannen & bearbeiten** – ein Scan erkennt jede Textzeile und bündelt sie
+  zu klickbaren Blöcken. Beim Antippen werden Schrift, Grösse, Stil, Farbe und der
+  Hintergrund automatisch übernommen, sodass die Änderung unsichtbar einfügt
+- **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
+  Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied
 - **Neuen Text** in Sans-/Serif-/Mono-Schrift hinzufügen (fett, kursiv, Ausrichtung, Farbe)
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
 - **Bilder** platzieren
 - **Markieren**, **freihändig zeichnen**, **Rechtecke/Ellipsen**, **Bereiche schwärzen**
+
+### 3. Oberfläche
+- **Helles & dunkles Design** (umschaltbar, merkt sich die Wahl)
+- Tastaturkürzel für jedes Werkzeug, Undo/Redo, Speichern
 
 ## Warum „ohne Qualitätsverlust"?
 

@@ -12,9 +12,11 @@ import { CSS } from '@dnd-kit/utilities';
 import { useStore, visibleSize, type EditorPage } from '../state/store';
 import { useUI } from '../state/ui';
 import { renderPageToCanvas } from '../lib/pdf';
-import { RotateCw, Copy, Trash2, Plus, PanelLeftClose } from 'lucide-react';
+import { RotateCw, Copy, Trash2, Plus, PanelLeftClose, ZoomIn, ZoomOut } from 'lucide-react';
 
-function Thumbnail({ page }: { page: EditorPage }) {
+const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2.5);
+
+function Thumbnail({ page, thumbZoom }: { page: EditorPage; thumbZoom: number }) {
   const engine = useStore((s) => s.engine);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rotation = (((page.baseRotation + page.addedRotation) % 360) + 360) % 360;
@@ -23,10 +25,12 @@ function Thumbnail({ page }: { page: EditorPage }) {
     let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Larger zoom ⇒ render at a higher resolution so the text becomes legible.
+    const target = 150 * thumbZoom * DPR;
     if (page.blank) {
       const ctx = canvas.getContext('2d');
       const { width, height } = visibleSize(page);
-      const scale = 120 / Math.max(width, height);
+      const scale = target / Math.max(width, height);
       canvas.width = Math.max(1, Math.floor(width * scale));
       canvas.height = Math.max(1, Math.floor(height * scale));
       if (ctx) {
@@ -40,7 +44,7 @@ function Thumbnail({ page }: { page: EditorPage }) {
         const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
         if (cancelled) return;
         const view = pdfPage.getViewport({ scale: 1, rotation });
-        const scale = 130 / Math.max(view.width, view.height);
+        const scale = target / Math.max(view.width, view.height);
         await renderPageToCanvas(pdfPage, canvas, scale, rotation);
       } catch {
         /* ignore render race */
@@ -49,12 +53,12 @@ function Thumbnail({ page }: { page: EditorPage }) {
     return () => {
       cancelled = true;
     };
-  }, [engine, page, rotation]);
+  }, [engine, page, rotation, thumbZoom]);
 
   return <canvas ref={canvasRef} className="thumb-canvas" />;
 }
 
-function SortablePage({ page, index }: { page: EditorPage; index: number }) {
+function SortablePage({ page, index, thumbZoom }: { page: EditorPage; index: number; thumbZoom: number }) {
   const currentPageId = useStore((s) => s.currentPageId);
   const setCurrentPage = useStore((s) => s.setCurrentPage);
   const rotatePage = useStore((s) => s.rotatePage);
@@ -80,7 +84,7 @@ function SortablePage({ page, index }: { page: EditorPage; index: number }) {
         role="button"
         tabIndex={0}
       >
-        <Thumbnail page={page} />
+        <Thumbnail page={page} thumbZoom={thumbZoom} />
       </div>
       <div className="thumb-meta">
         <span className="thumb-num">{index + 1}</span>
@@ -109,8 +113,13 @@ export function PageSidebar() {
   const insertBlankAfter = useStore((s) => s.insertBlankAfter);
   const sidebarOpen = useUI((s) => s.sidebarOpen);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
+  const thumbZoom = useUI((s) => s.thumbZoom);
+  const setThumbZoom = useUI((s) => s.setThumbZoom);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  // Grow the panel as thumbnails are zoomed so the page text can be read.
+  const sidebarWidth = Math.round(190 + (thumbZoom - 1) * 150);
 
   const onDragEnd = (e: DragEndEvent) => {
     const { active, over } = e;
@@ -129,7 +138,7 @@ export function PageSidebar() {
   }
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={{ width: sidebarWidth }}>
       <div className="sidebar-head">
         <span>Seiten · {pages.length}</span>
         <button className="btn ghost icon" onClick={toggleSidebar} title="Einklappen">
@@ -140,12 +149,38 @@ export function PageSidebar() {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={pages.map((p) => p.id)} strategy={verticalListSortingStrategy}>
             {pages.map((p, i) => (
-              <SortablePage key={p.id} page={p} index={i} />
+              <SortablePage key={p.id} page={p} index={i} thumbZoom={thumbZoom} />
             ))}
           </SortableContext>
         </DndContext>
       </div>
       <div className="sidebar-foot">
+        <div className="thumb-zoom" title="In die Seitenübersicht hineinzoomen">
+          <button
+            className="btn ghost icon"
+            onClick={() => setThumbZoom(thumbZoom - 0.25)}
+            disabled={thumbZoom <= 1}
+            title="Übersicht verkleinern"
+          >
+            <ZoomOut size={15} />
+          </button>
+          <input
+            type="range"
+            min={1}
+            max={3}
+            step={0.25}
+            value={thumbZoom}
+            onChange={(e) => setThumbZoom(Number(e.target.value))}
+          />
+          <button
+            className="btn ghost icon"
+            onClick={() => setThumbZoom(thumbZoom + 0.25)}
+            disabled={thumbZoom >= 3}
+            title="Übersicht vergrössern"
+          >
+            <ZoomIn size={15} />
+          </button>
+        </div>
         <button className="btn ghost" onClick={() => insertBlankAfter(null)}>
           <Plus size={15} /> Leere Seite
         </button>

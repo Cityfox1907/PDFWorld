@@ -6,8 +6,9 @@ import type { ImageElement } from '../lib/pdf';
 import { uid } from '../lib/utils/id';
 import {
   MousePointer2,
-  PenLine,
+  ScanText,
   Type,
+  Paintbrush,
   Highlighter,
   Pencil,
   Square,
@@ -28,8 +29,9 @@ interface ToolDef {
 
 const TOP: ToolDef[] = [
   { id: 'select', icon: MousePointer2, label: 'Auswählen', key: 'V' },
-  { id: 'edit-text', icon: PenLine, label: 'Text bearbeiten', key: 'E' },
+  { id: 'edit-text', icon: ScanText, label: 'Text scannen & bearbeiten', key: 'E' },
   { id: 'text', icon: Type, label: 'Text einfügen', key: 'T' },
+  { id: 'brush', icon: Paintbrush, label: 'Hintergrund-Pinsel', key: 'C' },
   { id: 'highlight', icon: Highlighter, label: 'Markieren', key: 'H' },
   { id: 'draw', icon: Pencil, label: 'Zeichnen', key: 'D' },
   { id: 'rect', icon: Square, label: 'Rechteck', key: 'R' },

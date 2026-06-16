@@ -48,6 +48,7 @@ export function Workspace() {
         v: 'select',
         e: 'edit-text',
         t: 'text',
+        c: 'brush',
         h: 'highlight',
         d: 'draw',
         r: 'rect',

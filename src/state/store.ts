@@ -16,6 +16,7 @@ export type ToolId =
   | 'select'
   | 'edit-text'
   | 'text'
+  | 'brush'
   | 'highlight'
   | 'draw'
   | 'rect'
@@ -49,6 +50,10 @@ export interface ToolDefaults {
   drawWidth: number;
   shapeFill: string;
   shapeStroke: string;
+  /** width of the background cover brush, in view points */
+  brushWidth: number;
+  /** last colour the brush sampled from the page (for the inspector preview) */
+  brushColor: string;
 }
 
 interface Snapshot {
@@ -133,6 +138,8 @@ const DEFAULT_TOOL: ToolDefaults = {
   drawWidth: 2.5,
   shapeFill: '#ffffff',
   shapeStroke: '#111111',
+  brushWidth: 18,
+  brushColor: '#ffffff',
 };
 
 function visibleSize(p: EditorPage): { width: number; height: number } {

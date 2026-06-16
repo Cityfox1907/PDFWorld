@@ -187,10 +187,41 @@ export function Inspector() {
         </Group>
       );
     }
+    if (activeTool === 'brush') {
+      return (
+        <Group title="Hintergrund-Pinsel">
+          <Row>
+            <label>Stärke</label>
+            <input
+              type="range"
+              min={4}
+              max={64}
+              step={1}
+              value={tool.brushWidth}
+              onChange={(e) => setToolDefaults({ brushWidth: Number(e.target.value) })}
+            />
+            <span className="insp-val">{Math.round(tool.brushWidth)}</span>
+          </Row>
+          <Row>
+            <label>Aufgenommen</label>
+            <span className="swatch-preview" style={{ background: tool.brushColor }} />
+            <span className="insp-hint" style={{ margin: 0 }}>{tool.brushColor}</span>
+          </Row>
+          <p className="insp-hint">
+            Male über eine Stelle — der Pinsel nimmt automatisch die exakte Hintergrundfarbe
+            direkt darunter auf und überdeckt den Inhalt unsichtbar.
+          </p>
+        </Group>
+      );
+    }
     if (activeTool === 'edit-text') {
       return (
-        <Group title="Text bearbeiten">
-          <p className="insp-hint">Klicke auf bestehenden Text in der Seite, um ihn zu ändern. Die Schrift wird automatisch erkannt.</p>
+        <Group title="Text scannen">
+          <p className="insp-hint">
+            Erkannte Textzeilen werden markiert. Klicke auf eine Zeile, um sie direkt zu
+            bearbeiten — Schrift, Grösse, Stil, Farbe und Hintergrund werden automatisch
+            übernommen, sodass kein Unterschied sichtbar bleibt.
+          </p>
         </Group>
       );
     }

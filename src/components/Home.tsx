@@ -1,12 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { FileUp, Layers, Type, FileSignature, FormInput, ShieldCheck, Loader2 } from 'lucide-react';
+import { FileUp, ScanText, Paintbrush, FormInput, Layers, ShieldCheck, Loader2 } from 'lucide-react';
 
 const FEATURES = [
-  { icon: Layers, title: 'Seiten verwalten', desc: 'Zusammenführen, sortieren, einfügen, löschen, drehen — verlustfrei.' },
-  { icon: Type, title: 'Text bearbeiten', desc: 'Bestehenden Text ändern und neuen Text in passender Schrift hinzufügen.' },
-  { icon: FormInput, title: 'Formulare ausfüllen', desc: 'Interaktive PDF-Formularfelder direkt erkennen und befüllen.' },
-  { icon: FileSignature, title: 'Unterschrift & Bilder', desc: 'Signatur zeichnen, hochladen und Bilder platzieren.' },
+  { icon: ScanText, title: 'Text scannen & bearbeiten', desc: 'Bestehenden Text antippen — Schrift, Grösse, Stil und Farbe werden automatisch erkannt und übernommen.' },
+  { icon: Paintbrush, title: 'Hintergrund-Pinsel', desc: 'Nimmt die exakte Hintergrundfarbe auf und überdeckt Inhalte unsichtbar.' },
+  { icon: Layers, title: 'Seiten verwalten & zoomen', desc: 'Zusammenführen, sortieren, drehen — und in der Übersicht in die Texte hineinzoomen.' },
+  { icon: FormInput, title: 'Formulare & Signatur', desc: 'Formularfelder ausfüllen, unterschreiben und Bilder platzieren.' },
 ];
 
 export function Home() {

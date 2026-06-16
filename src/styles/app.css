@@ -37,7 +37,11 @@
   color: var(--text);
 }
 .home-head h1 span {
-  color: var(--accent);
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 .home-sub {
   margin: 14px auto 0;
@@ -48,7 +52,7 @@
 }
 .dropzone {
   margin-top: 36px;
-  border: 1.5px dashed rgba(0, 0, 0, 0.18);
+  border: 1.5px dashed var(--text-3);
   border-radius: var(--r-xl);
   background: var(--panel);
   padding: 44px 24px;
@@ -72,8 +76,9 @@
   border-radius: 16px;
   display: grid;
   place-items: center;
-  color: var(--accent);
-  background: var(--accent-tint);
+  color: #fff;
+  background: var(--accent-grad);
+  box-shadow: 0 8px 22px var(--accent-ring);
 }
 .dropzone-title {
   font-size: 17px;
@@ -188,7 +193,11 @@
 }
 .brand em {
   font-style: normal;
-  color: var(--accent);
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 .file-pill {
   font-size: 12.5px;
@@ -303,6 +312,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  transition: width 0.2s var(--ease);
 }
 .sidebar-head {
   display: flex;
@@ -325,9 +335,27 @@
 .sidebar-foot {
   padding: 10px 12px;
   border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .sidebar-foot .btn {
   width: 100%;
+}
+.thumb-zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.thumb-zoom input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.thumb-zoom .btn.icon {
+  height: 28px;
+  width: 28px;
+  flex-shrink: 0;
 }
 .sidebar-reopen {
   width: 30px;
@@ -414,7 +442,7 @@
 .canvas-area {
   flex: 1;
   overflow: auto;
-  background: var(--bg);
+  background: var(--canvas-bg);
   position: relative;
 }
 .canvas-stage {
@@ -446,6 +474,9 @@
 .canvas-area.tool-redact .overlay,
 .canvas-area.tool-draw .overlay {
   cursor: crosshair;
+}
+.canvas-area.tool-brush .overlay {
+  cursor: cell;
 }
 
 .el {
@@ -546,24 +577,83 @@ svg.draft {
 }
 .run-box {
   position: absolute;
-  border-radius: 2px;
+  border-radius: 3px;
   cursor: text;
-  transition: background 0.1s;
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+  transition: background 0.12s, box-shadow 0.12s, transform 0.1s var(--ease);
 }
 .run-box:hover {
-  background: var(--accent-tint);
-  box-shadow: 0 0 0 1px var(--accent-ring);
+  background: var(--accent-ring);
+  box-shadow: inset 0 0 0 1px var(--accent), 0 2px 10px var(--accent-tint);
+}
+.run-tag {
+  position: absolute;
+  top: -9px;
+  left: -1px;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  font-variant-numeric: tabular-nums;
+}
+.run-box:hover .run-tag {
+  opacity: 1;
 }
 .run-input {
   position: absolute;
   border: 1.5px solid var(--accent);
-  border-radius: 2px;
-  background: #fff;
-  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--panel);
+  padding: 0 2px;
   margin: 0;
   outline: none;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
-  color: inherit;
+  box-shadow: 0 4px 18px var(--accent-ring);
+  color: var(--text);
+}
+
+/* Sweeping scan line that confirms the page has been analysed. */
+.scan-sweep {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: 2px;
+}
+.scan-sweep::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 38%;
+  top: -40%;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--accent-tint) 50%,
+    transparent 100%
+  );
+  box-shadow: 0 0 14px 2px var(--accent-tint);
+  animation: scan 1.5s var(--ease) 1;
+}
+@keyframes scan {
+  from {
+    top: -40%;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  to {
+    top: 100%;
+    opacity: 0;
+  }
 }
 
 /* ── INSPECTOR ── */
@@ -625,6 +715,14 @@ svg.draft {
 .insp-actions .btn {
   width: 100%;
   justify-content: flex-start;
+}
+.swatch-preview {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
 }
 
 /* ── FORM PANEL ── */

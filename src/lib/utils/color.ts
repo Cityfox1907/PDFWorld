@@ -23,15 +23,17 @@ export function sampleBackground(
   canvas: HTMLCanvasElement,
   box: { x: number; y: number; width: number; height: number },
   scale: number,
+  originX = 0,
+  originY = 0,
 ): string {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return '#ffffff';
 
   const pad = Math.max(2, Math.round(2 * scale));
-  const left = Math.round(box.x * scale);
-  const top = Math.round(box.y * scale);
-  const right = Math.round((box.x + box.width) * scale);
-  const bottom = Math.round((box.y + box.height) * scale);
+  const left = Math.round(box.x * scale - originX);
+  const top = Math.round(box.y * scale - originY);
+  const right = Math.round((box.x + box.width) * scale - originX);
+  const bottom = Math.round((box.y + box.height) * scale - originY);
 
   // Probe whole strips just outside each edge of the run (where the page
   // background is clean), then take the *mode* colour. Strips beat single points
@@ -75,17 +77,22 @@ export function sampleBackground(
  * Sample a single point's color on the rendered canvas, in view-point space.
  * Used by the background brush so a stroke perfectly matches the paper/page colour
  * directly under the cursor. Averages a small neighbourhood to cancel anti-alias noise.
+ *
+ * `originX`/`originY` are the canvas's top-left in bitmap pixels (non-zero when the
+ * canvas holds only the visible window of the page rather than the whole page).
  */
 export function sampleColorAt(
   canvas: HTMLCanvasElement,
   vx: number,
   vy: number,
   scale: number,
+  originX = 0,
+  originY = 0,
 ): string {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return '#ffffff';
-  const cx = Math.round(vx * scale);
-  const cy = Math.round(vy * scale);
+  const cx = Math.round(vx * scale - originX);
+  const cy = Math.round(vy * scale - originY);
   const r = Math.max(1, Math.round(2 * scale));
   const x = Math.max(0, cx - r);
   const y = Math.max(0, cy - r);
@@ -122,11 +129,13 @@ export function sampleTextColor(
   canvas: HTMLCanvasElement,
   box: { x: number; y: number; width: number; height: number },
   scale: number,
+  originX = 0,
+  originY = 0,
 ): string {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return '#111111';
-  const x = Math.max(0, Math.round(box.x * scale));
-  const y = Math.max(0, Math.round(box.y * scale));
+  const x = Math.max(0, Math.round(box.x * scale - originX));
+  const y = Math.max(0, Math.round(box.y * scale - originY));
   const w = Math.min(canvas.width - x, Math.round(box.width * scale));
   const h = Math.min(canvas.height - y, Math.round(box.height * scale));
   if (w <= 0 || h <= 0) return '#111111';

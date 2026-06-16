@@ -102,6 +102,43 @@ export async function renderPageToCanvas(
   return { width: viewport.width, height: viewport.height };
 }
 
+/**
+ * Render ONLY a sub-rectangle of a page into `canvas`, rasterised 1:1 to the device.
+ *
+ * This is the key to lossless zoom: instead of drawing the whole (huge) page at the
+ * zoom level — which forces the bitmap resolution down once it hits the browser's
+ * canvas-area limit and makes glyphs blurry — we rasterise just the visible window
+ * at full device density. Every on-screen pixel gets its own vector sample, so text
+ * stays knife-sharp at any magnification, exactly like a native PDF viewer.
+ *
+ * `deviceScale` is the view-point → bitmap-pixel factor (pageScale · devicePixelRatio).
+ * `offsetX` / `offsetY` are the bitmap-pixel coordinates of the region's top-left
+ * inside the full page; the page raster is shifted by them so the requested window
+ * lands at the canvas origin. The canvas backing store must already be sized to the
+ * region (in device pixels).
+ */
+export async function renderPageRegion(
+  page: PDFPageProxy,
+  canvas: HTMLCanvasElement,
+  deviceScale: number,
+  rotation: number,
+  offsetX: number,
+  offsetY: number,
+): Promise<void> {
+  const viewport = page.getViewport({ scale: deviceScale, rotation });
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('2D context unavailable');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({
+    canvas,
+    canvasContext: ctx,
+    viewport,
+    // Translate the full-page raster so the visible window maps to (0,0) on the canvas.
+    transform: [1, 0, 0, 1, -offsetX, -offsetY],
+  }).promise;
+}
+
 /** Visible (rotation-aware) page size in points at scale 1. */
 export function pageViewSize(page: PDFPageProxy, rotation: number): { width: number; height: number } {
   const vp = page.getViewport({ scale: 1, rotation });

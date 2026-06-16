@@ -28,6 +28,7 @@ export { readFields, applyFieldValues, finalizeForm, hasForm, formDiagnostics } 
 export {
   loadPdfjs,
   renderPageToCanvas,
+  renderPageRegion,
   extractTextRuns,
   inspectFonts,
   groupRunsIntoLines,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, visibleSize, type EditorPage } from '../state/store';
 import {
-  renderPageToCanvas,
+  renderPageRegion,
   extractTextRuns,
   inspectFonts,
   groupRunsIntoLines,
@@ -20,11 +20,20 @@ import { uid } from '../lib/utils/id';
 import { ElementView } from './ElementView';
 import { Type, Check, X } from 'lucide-react';
 
-const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2.5);
-// Caps that keep the page bitmap inside every browser's canvas limits, so even an
-// extreme zoom renders softened-but-visible content instead of failing to all-white.
+const DEVICE_PIXEL_RATIO = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+// Density at which the visible window is rasterised. We render at (at least) the
+// display's own pixel density so every screen pixel gets its own vector sample —
+// glyph edges stay knife-sharp, never an upscaled blur. A touch of supersampling on
+// low-DPI screens smooths anti-aliasing; capped so huge monitors stay within limits.
+const TARGET_DENSITY = Math.min(Math.max(DEVICE_PIXEL_RATIO, 2), 3);
+// Caps that keep the *window* bitmap inside every browser's canvas limits. Because we
+// only ever rasterise the visible window (never the whole zoomed page), these are
+// effectively never hit at normal viewport sizes, so density stays at the target.
 const MAX_BITMAP_DIM = 8192;
 const MAX_BITMAP_AREA = 16_000_000;
+// Extra CSS px rendered just outside the viewport so small scrolls reveal already-
+// sharp content instead of a blank edge while the next window render lands.
+const OVERSCAN = 128;
 // Highest magnification (1000 %). Mirrors the clamp in the store's setZoom.
 const MAX_ZOOM = 10;
 const MIN_ZOOM = 0.25;
@@ -47,8 +56,16 @@ export function PageCanvas() {
   const setToolDefaults = useStore((s) => s.setToolDefaults);
 
   const areaRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  // The page-window currently painted on the canvas, in scale-independent view-point
+  // space, plus the density it was rasterised at. Used to (a) re-stretch the existing
+  // bitmap instantly during a zoom and (b) map view-points → canvas pixels for colour
+  // sampling, since the canvas now covers only the window, not the whole page.
+  const regionRef = useRef<{ vx: number; vy: number; vw: number; vh: number; renderScale: number; dpr: number } | null>(null);
+  // Monotonic id so a slower render can detect it was superseded and bail.
+  const renderTokenRef = useRef(0);
   const [fitScale, setFitScale] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AnyElement | null>(null);
@@ -96,78 +113,145 @@ export function PageCanvas() {
     return () => ro.disconnect();
   }, [page, view.width, view.height]);
 
-  // ── Render the page bitmap ────────────────────────────────────────────────
-  // The visible canvas is always *styled* at view·scale, so during a zoom the
-  // previous bitmap is simply stretched (smooth, never blank). The crisp bitmap
-  // is rendered off-screen first and blitted in a single synchronous step — so
-  // the on-screen canvas is never cleared to white — and zoom re-renders are
-  // debounced so a fast pinch doesn't thrash pdf.js. The bitmap resolution is
-  // capped so a huge zoom can't blow past the browser's canvas limits.
+  // ── Render the visible page-window (lossless zoom) ────────────────────────
+  // We rasterise ONLY the part of the page inside the scroll viewport, at full
+  // device density, and lay that bitmap over its spot on the stage. Because the
+  // window never grows past the screen, the bitmap never hits the canvas-area cap
+  // that used to force resolution down at high zoom — so glyph edges stay razor
+  // sharp at any magnification, exactly like a native PDF viewer. The off-screen
+  // render is blitted in one synchronous step, so the canvas never flashes white.
+  const paintViewport = useCallback(async () => {
+    const canvas = canvasRef.current;
+    const area = areaRef.current;
+    const stage = stageRef.current;
+    if (!canvas || !area || !stage || !page) return;
+    const token = ++renderTokenRef.current;
+
+    const stageW = view.width * scale;
+    const stageH = view.height * scale;
+    if (stageW < 1 || stageH < 1) return;
+
+    // Visible window of the stage in stage-local CSS px, padded by OVERSCAN, clamped
+    // to the page. getBoundingClientRect folds in scroll position and the centring
+    // margin, so this stays correct however the stage is laid out.
+    const areaRect = area.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
+    const left = Math.max(0, areaRect.left - stageRect.left - OVERSCAN);
+    const top = Math.max(0, areaRect.top - stageRect.top - OVERSCAN);
+    const right = Math.min(stageW, areaRect.right - stageRect.left + OVERSCAN);
+    const bottom = Math.min(stageH, areaRect.bottom - stageRect.top + OVERSCAN);
+    const cssW = right - left;
+    const cssH = bottom - top;
+    if (cssW < 1 || cssH < 1) return;
+
+    // Full target density; lowered only if the window itself is enormous.
+    let dpr = Math.min(TARGET_DENSITY, MAX_BITMAP_DIM / cssW, MAX_BITMAP_DIM / cssH, Math.sqrt(MAX_BITMAP_AREA / (cssW * cssH)));
+    dpr = Math.max(0.5, dpr);
+
+    const bw = Math.max(1, Math.round(cssW * dpr));
+    const bh = Math.max(1, Math.round(cssH * dpr));
+    // Scale-independent geometry so a later zoom can re-stretch this same bitmap.
+    const region = { vx: left / scale, vy: top / scale, vw: cssW / scale, vh: cssH / scale, renderScale: scale, dpr };
+
+    const place = () => {
+      canvas.style.left = `${region.vx * scale}px`;
+      canvas.style.top = `${region.vy * scale}px`;
+      canvas.style.width = `${region.vw * scale}px`;
+      canvas.style.height = `${region.vh * scale}px`;
+    };
+
+    if (page.blank) {
+      const ctx = canvas.getContext('2d', { alpha: false });
+      canvas.width = bw;
+      canvas.height = bh;
+      if (ctx) {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, bw, bh);
+      }
+      place();
+      regionRef.current = region;
+      return;
+    }
+
+    try {
+      const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
+      if (token !== renderTokenRef.current) return;
+      const off = document.createElement('canvas');
+      off.width = bw;
+      off.height = bh;
+      await renderPageRegion(pdfPage, off, scale * dpr, rotation, left * dpr, top * dpr);
+      if (token !== renderTokenRef.current) return;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx) return;
+      // Resize + reposition + blit together: the on-screen canvas never goes blank.
+      canvas.width = bw;
+      canvas.height = bh;
+      ctx.drawImage(off, 0, 0);
+      place();
+      regionRef.current = region;
+    } catch {
+      /* superseded by a newer render */
+    }
+  }, [engine, page, scale, rotation, view.width, view.height]);
+
+  // Drive the window render: immediate on a page / rotation / size change (clearing
+  // the stale page first so it can't flash), debounced on a pure zoom so the stretched
+  // preview leads and the crisp re-render lands once the gesture settles.
   const renderSigRef = useRef('');
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !page) return;
-    let cancelled = false;
-
-    const cssW = view.width * scale;
-    const cssH = view.height * scale;
-
-    const renderNow = async () => {
-      if (cssW < 1 || cssH < 1) return;
-      let dpr = Math.min(DPR, MAX_BITMAP_DIM / cssW, MAX_BITMAP_DIM / cssH, Math.sqrt(MAX_BITMAP_AREA / (cssW * cssH)));
-      dpr = Math.max(0.5, dpr);
-
-      if (page.blank) {
-        const ctx = canvas.getContext('2d', { alpha: false });
-        canvas.width = Math.max(1, Math.round(cssW * dpr));
-        canvas.height = Math.max(1, Math.round(cssH * dpr));
-        if (ctx) {
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-        return;
-      }
-
-      try {
-        const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
-        if (cancelled) return;
-        const off = document.createElement('canvas');
-        await renderPageToCanvas(pdfPage, off, scale * dpr, rotation);
-        if (cancelled) return;
-        const ctx = canvas.getContext('2d', { alpha: false });
-        if (!ctx) return;
-        // Resize + blit happen together: the on-screen canvas is never left blank.
-        canvas.width = off.width;
-        canvas.height = off.height;
-        ctx.drawImage(off, 0, 0);
-      } catch {
-        /* render race — a newer render superseded this one */
-      }
-    };
-
-    // Immediate for a page/rotation/size change; debounced for a pure zoom so the
-    // smooth stretched preview leads and the sharp re-render lands once settled.
     const sig = `${page.id}|${rotation}|${Math.round(view.width)}x${Math.round(view.height)}`;
     const onlyZoom = renderSigRef.current === sig;
     renderSigRef.current = sig;
-
-    // On a genuine page/rotation change clear to white first, so the previous page
-    // never flashes stretched or mis-rotated into the new frame. A pure zoom keeps
-    // the old bitmap (stretched) for a seamless, flash-free transition.
     if (!onlyZoom) {
+      regionRef.current = null; // the old bitmap belongs to the previous page/layout
       const ctx = canvas.getContext('2d', { alpha: false });
       if (ctx) {
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
     }
+    const t = window.setTimeout(() => void paintViewport(), onlyZoom ? 120 : 0);
+    return () => window.clearTimeout(t);
+  }, [paintViewport, page, rotation, view.width, view.height]);
 
-    const t = window.setTimeout(() => void renderNow(), onlyZoom ? 120 : 0);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
+  // Re-render the window after scrolling so freshly revealed area becomes sharp.
+  // Coalesced to one render per frame + a short settle so a fast flick doesn't thrash
+  // pdf.js; the OVERSCAN margin keeps the edge covered until the next render lands.
+  useEffect(() => {
+    const area = areaRef.current;
+    if (!area) return;
+    let raf = 0;
+    let settle = 0;
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        window.clearTimeout(settle);
+        settle = window.setTimeout(() => void paintViewport(), 60);
+      });
     };
-  }, [engine, page, scale, rotation, view.width, view.height]);
+    area.addEventListener('scroll', schedule, { passive: true });
+    return () => {
+      area.removeEventListener('scroll', schedule);
+      cancelAnimationFrame(raf);
+      window.clearTimeout(settle);
+    };
+  }, [paintViewport]);
+
+  // During a zoom (before the debounced sharp render lands) keep the existing window
+  // bitmap glued to its page position and stretched to the new scale — a smooth,
+  // flash-free transition that mirrors a continuous re-render.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    const region = regionRef.current;
+    if (!canvas || !region) return;
+    canvas.style.left = `${region.vx * scale}px`;
+    canvas.style.top = `${region.vy * scale}px`;
+    canvas.style.width = `${region.vw * scale}px`;
+    canvas.style.height = `${region.vh * scale}px`;
+  }, [scale]);
 
   // Load existing text runs when entering edit-text mode. Depends on the page
   // *source* (not its element list) so adding overlay edits never re-triggers a
@@ -358,6 +442,18 @@ export function PageCanvas() {
     return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
   };
 
+  // Map view-points → rendered-canvas pixels for colour sampling. The canvas now holds
+  // only the visible window, so reads go through the last render's origin + density
+  // (`px` = bitmap px per view-point, `ox`/`oy` = the window's top-left in bitmap px).
+  const sampleMap = () => {
+    const r = regionRef.current;
+    if (r) {
+      const px = r.renderScale * r.dpr;
+      return { px, ox: r.vx * px, oy: r.vy * px };
+    }
+    return { px: scale * TARGET_DENSITY, ox: 0, oy: 0 };
+  };
+
   // ── creating elements by dragging / clicking ──
   const onOverlayPointerDown = (e: React.PointerEvent) => {
     if (!page) return;
@@ -426,9 +522,9 @@ export function PageCanvas() {
     if (!page) return;
     const canvas = canvasRef.current;
     // Sample the exact colour directly under the cursor so the cover is invisible.
-    // Use the canvas's real pixel density (capped at high zoom) for accurate reads.
-    const px = canvas ? canvas.width / view.width : scale * DPR;
-    const color = canvas ? sampleColorAt(canvas, start.x, start.y, px) : '#ffffff';
+    // The cursor is always inside the rendered window, so the read is accurate.
+    const { px, ox, oy } = sampleMap();
+    const color = canvas ? sampleColorAt(canvas, start.x, start.y, px, ox, oy) : '#ffffff';
     setToolDefaults({ brushColor: color });
     const width = tool.brushWidth;
     const points: { x: number; y: number }[] = [start];
@@ -603,15 +699,15 @@ export function PageCanvas() {
 
   // ── scan tool: inspect a detected line, then adopt its exact typeface ──
   // Sample the line's real text colour and the page background directly from the
-  // rendered canvas. Sampling uses the canvas's ACTUAL pixels-per-view-point (it may
-  // be rendered at a capped resolution at high zoom, so scale·DPR would mis-point).
+  // rendered canvas via sampleMap(), which maps view-points to the window bitmap's
+  // own origin + density (the canvas covers only the visible window, not the page).
   const sampleRun = (run: TextRun): { color: string; bg: string } => {
     const canvas = canvasRef.current;
     const box = { x: run.x, y: run.y, width: Math.max(run.width, 24), height: run.height };
-    const px = canvas ? canvas.width / view.width : scale * DPR;
+    const { px, ox, oy } = sampleMap();
     return {
-      color: canvas ? sampleTextColor(canvas, box, px) : '#111111',
-      bg: canvas ? sampleBackground(canvas, box, px) : '#ffffff',
+      color: canvas ? sampleTextColor(canvas, box, px, ox, oy) : '#111111',
+      bg: canvas ? sampleBackground(canvas, box, px, ox, oy) : '#ffffff',
     };
   };
 
@@ -677,8 +773,10 @@ export function PageCanvas() {
 
   return (
     <div className={`canvas-area tool-${activeTool}`} ref={areaRef}>
-      <div className="canvas-stage" style={{ width: view.width * scale, height: view.height * scale }}>
-        <canvas ref={canvasRef} className="page-canvas" style={{ width: view.width * scale, height: view.height * scale }} />
+      <div ref={stageRef} className="canvas-stage" style={{ width: view.width * scale, height: view.height * scale }}>
+        {/* Geometry (left/top/width/height) is set imperatively per render so React
+            re-renders never clobber the window placement; see paintViewport. */}
+        <canvas ref={canvasRef} className="page-canvas" />
         <div
           ref={overlayRef}
           className="overlay"

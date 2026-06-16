@@ -28,30 +28,37 @@ export function sampleBackground(
   if (!ctx) return '#ffffff';
 
   const pad = Math.max(2, Math.round(2 * scale));
-  const samples: [number, number][] = [];
   const left = Math.round(box.x * scale);
   const top = Math.round(box.y * scale);
   const right = Math.round((box.x + box.width) * scale);
   const bottom = Math.round((box.y + box.height) * scale);
-  const midY = Math.round((box.y + box.height / 2) * scale);
 
-  // Probe just left/right of the run, and above/below, where background is clean.
-  samples.push([left - pad, midY], [right + pad, midY]);
-  samples.push([left + 1, top - pad], [left + 1, bottom + pad]);
-
+  // Probe whole strips just outside each edge of the run (where the page
+  // background is clean), then take the *mode* colour. Strips beat single points
+  // because they survive specks, underlines and anti-aliased glyph edges.
   const counts = new Map<string, number>();
-  for (const [px, py] of samples) {
-    if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) continue;
+  const addStrip = (x0: number, y0: number, w: number, h: number) => {
+    const x = Math.max(0, Math.min(canvas.width - 1, x0));
+    const y = Math.max(0, Math.min(canvas.height - 1, y0));
+    const ww = Math.max(1, Math.min(canvas.width - x, w));
+    const hh = Math.max(1, Math.min(canvas.height - y, h));
     try {
-      const d = ctx.getImageData(px, py, 1, 1).data;
-      const hex = `#${d[0].toString(16).padStart(2, '0')}${d[1].toString(16).padStart(2, '0')}${d[2]
-        .toString(16)
-        .padStart(2, '0')}`;
-      counts.set(hex, (counts.get(hex) ?? 0) + 1);
+      const d = ctx.getImageData(x, y, ww, hh).data;
+      for (let i = 0; i < d.length; i += 4) {
+        // Quantise to 4-bit per channel so near-identical tones merge.
+        const q = (v: number) => (v & 0xf0);
+        const hex = `#${q(d[i]).toString(16).padStart(2, '0')}${q(d[i + 1]).toString(16).padStart(2, '0')}${q(d[i + 2]).toString(16).padStart(2, '0')}`;
+        counts.set(hex, (counts.get(hex) ?? 0) + 1);
+      }
     } catch {
       /* cross-origin or out of range */
     }
-  }
+  };
+
+  addStrip(left - pad * 2, top, pad, bottom - top); // left margin
+  addStrip(right + pad, top, pad, bottom - top); // right margin
+  addStrip(left, top - pad * 2, right - left, pad); // above
+  addStrip(left, bottom + pad, right - left, pad); // below
 
   let best = '#ffffff';
   let bestCount = 0;
@@ -62,6 +69,47 @@ export function sampleBackground(
     }
   }
   return best;
+}
+
+/**
+ * Sample a single point's color on the rendered canvas, in view-point space.
+ * Used by the background brush so a stroke perfectly matches the paper/page colour
+ * directly under the cursor. Averages a small neighbourhood to cancel anti-alias noise.
+ */
+export function sampleColorAt(
+  canvas: HTMLCanvasElement,
+  vx: number,
+  vy: number,
+  scale: number,
+): string {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return '#ffffff';
+  const cx = Math.round(vx * scale);
+  const cy = Math.round(vy * scale);
+  const r = Math.max(1, Math.round(2 * scale));
+  const x = Math.max(0, cx - r);
+  const y = Math.max(0, cy - r);
+  const w = Math.min(canvas.width - x, r * 2 + 1);
+  const h = Math.min(canvas.height - y, r * 2 + 1);
+  if (w <= 0 || h <= 0) return '#ffffff';
+  try {
+    const data = ctx.getImageData(x, y, w, h).data;
+    let rs = 0;
+    let gs = 0;
+    let bs = 0;
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      rs += data[i];
+      gs += data[i + 1];
+      bs += data[i + 2];
+      n++;
+    }
+    if (!n) return '#ffffff';
+    const hex = (v: number) => Math.round(v / n).toString(16).padStart(2, '0');
+    return `#${hex(rs)}${hex(gs)}${hex(bs)}`;
+  } catch {
+    return '#ffffff';
+  }
 }
 
 /** Sample the darkest pixel within a text box — a good estimate of glyph color. */

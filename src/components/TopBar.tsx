@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useStore } from '../state/store';
-import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2 } from 'lucide-react';
+import { useUI } from '../state/ui';
+import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2, Moon, Sun } from 'lucide-react';
 
 export function TopBar() {
   const fileName = useStore((s) => s.fileName);
@@ -14,6 +15,8 @@ export function TopBar() {
   const exporting = useStore((s) => s.exporting);
   const mergeFile = useStore((s) => s.mergeFile);
   const reset = useStore((s) => s.reset);
+  const theme = useUI((s) => s.theme);
+  const toggleTheme = useUI((s) => s.toggleTheme);
   const mergeRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -50,6 +53,13 @@ export function TopBar() {
       </div>
 
       <div className="topbar-right">
+        <button
+          className="btn ghost icon"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Helles Design' : 'Dunkles Design'}
+        >
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
         <button className="btn ghost" onClick={() => mergeRef.current?.click()} title="Weiteres PDF anfügen">
           <FilePlus2 size={16} /> PDF anfügen
         </button>

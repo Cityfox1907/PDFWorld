@@ -17,6 +17,7 @@ export {
   loadPdfjs,
   renderPageToCanvas,
   extractTextRuns,
+  groupRunsIntoLines,
   totalRotation,
   pageViewSize,
 } from './render';

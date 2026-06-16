@@ -3,12 +3,13 @@ import { useStore, visibleSize, type EditorPage } from '../state/store';
 import {
   renderPageToCanvas,
   extractTextRuns,
+  groupRunsIntoLines,
   cssFontFor,
   type AnyElement,
   type TextElement,
   type TextRun,
 } from '../lib/pdf';
-import { sampleBackground, sampleTextColor } from '../lib/utils/color';
+import { sampleBackground, sampleTextColor, sampleColorAt } from '../lib/utils/color';
 import { uid } from '../lib/utils/id';
 import { ElementView } from './ElementView';
 
@@ -28,6 +29,7 @@ export function PageCanvas() {
   const commit = useStore((s) => s.commit);
   const selectElement = useStore((s) => s.selectElement);
   const setTool = useStore((s) => s.setTool);
+  const setToolDefaults = useStore((s) => s.setToolDefaults);
 
   const areaRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -100,7 +102,7 @@ export function PageCanvas() {
       try {
         const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
         const r = await extractTextRuns(pdfPage, rotation);
-        if (!cancelled) setRuns(r);
+        if (!cancelled) setRuns(groupRunsIntoLines(r));
       } catch {
         if (!cancelled) setRuns([]);
       }
@@ -152,7 +154,77 @@ export function PageCanvas() {
       startDrawing(start);
       return;
     }
+    if (activeTool === 'brush') {
+      startBrush(start, e);
+      return;
+    }
     startShape(start, e);
+  };
+
+  // ── background cover brush: paints a stroke in the page's own background colour ──
+  const startBrush = (start: { x: number; y: number }, e: React.PointerEvent) => {
+    if (!page) return;
+    const canvas = canvasRef.current;
+    // Sample the exact colour directly under the cursor so the cover is invisible.
+    const color = canvas ? sampleColorAt(canvas, start.x, start.y, scale * DPR) : '#ffffff';
+    setToolDefaults({ brushColor: color });
+    const width = tool.brushWidth;
+    const points: { x: number; y: number }[] = [start];
+    const bounds = () => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      const pad = width / 2;
+      return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+    };
+    const move = (ev: PointerEvent) => {
+      points.push(evToView(ev));
+      const b = bounds();
+      setDraft({
+        id: 'draft-brush',
+        type: 'ink',
+        x: b.minX,
+        y: b.minY,
+        width: b.maxX - b.minX,
+        height: b.maxY - b.minY,
+        opacity: 1,
+        z: nextZ(page),
+        points: [...points],
+        color,
+        strokeWidth: width,
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setDraft(null);
+      // A single click should still stamp a dot; duplicate the point so bake draws it.
+      if (points.length === 1) points.push({ x: start.x + 0.01, y: start.y + 0.01 });
+      const b = bounds();
+      addElement(page.id, {
+        id: uid('el'),
+        type: 'ink',
+        x: b.minX,
+        y: b.minY,
+        width: Math.max(1, b.maxX - b.minX),
+        height: Math.max(1, b.maxY - b.minY),
+        opacity: 1,
+        z: nextZ(page),
+        points,
+        color,
+        strokeWidth: width,
+      });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
   const startShape = (start: { x: number; y: number }, e: React.PointerEvent) => {
@@ -314,18 +386,22 @@ export function PageCanvas() {
 
           {draft && <DraftView el={draft} scale={scale} />}
 
-          {activeTool === 'edit-text' &&
-            runs.map((run, i) => (
-              <RunBox
-                key={i}
-                run={run}
-                scale={scale}
-                editing={editingRun === i}
-                onEdit={() => setEditingRun(i)}
-                onCommit={(text) => commitRunEdit(i, text)}
-                onCancel={() => setEditingRun(null)}
-              />
-            ))}
+          {activeTool === 'edit-text' && (
+            <>
+              {runs.length > 0 && editingRun === null && <div key={page.id} className="scan-sweep" />}
+              {runs.map((run, i) => (
+                <RunBox
+                  key={i}
+                  run={run}
+                  scale={scale}
+                  editing={editingRun === i}
+                  onEdit={() => setEditingRun(i)}
+                  onCommit={(text) => commitRunEdit(i, text)}
+                  onCancel={() => setEditingRun(null)}
+                />
+              ))}
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -409,5 +485,14 @@ function RunBox({
       />
     );
   }
-  return <div className="run-box" style={style} onPointerDown={onEdit} title="Klicken zum Bearbeiten" />;
+  return (
+    <div
+      className="run-box"
+      style={style}
+      onPointerDown={onEdit}
+      title={`„${run.str}“ · ${Math.round(run.fontSize)} pt · klicken zum Bearbeiten`}
+    >
+      <span className="run-tag">{Math.round(run.fontSize)}</span>
+    </div>
+  );
 }

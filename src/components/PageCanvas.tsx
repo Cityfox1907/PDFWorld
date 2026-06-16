@@ -3,7 +3,10 @@ import { useStore, visibleSize, type EditorPage } from '../state/store';
 import {
   renderPageToCanvas,
   extractTextRuns,
+  captureEmbeddedFonts,
   groupRunsIntoLines,
+  registerEmbeddedFont,
+  embeddedFontFamily,
   cssStackFor,
   type AnyElement,
   type TextElement,
@@ -18,6 +21,9 @@ const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 
 // extreme zoom renders softened-but-visible content instead of failing to all-white.
 const MAX_BITMAP_DIM = 8192;
 const MAX_BITMAP_AREA = 16_000_000;
+// Highest magnification (1000 %). Mirrors the clamp in the store's setZoom.
+const MAX_ZOOM = 10;
+const MIN_ZOOM = 0.25;
 
 export function PageCanvas() {
   const pages = useStore((s) => s.pages);
@@ -161,10 +167,24 @@ export function PageCanvas() {
       try {
         const pdfPage = await engine.getPage(pageSourceKey, pageSourceIndex);
         const r = await extractTextRuns(pdfPage, rotation);
-        if (!cancelled) {
-          setRuns(groupRunsIntoLines(r));
-          setScanId((n) => n + 1); // replay the scan sweep once per real scan
-        }
+        if (cancelled) return;
+        const lines = groupRunsIntoLines(r);
+        setRuns(lines); // show the clickable boxes immediately
+        setScanId((n) => n + 1); // replay the scan sweep once per real scan
+
+        // Then capture the ORIGINAL embedded fonts and attach them, so clicking a
+        // line edits it in its real typeface (on screen and on export). Best-effort:
+        // lines whose font isn't embedded simply keep the metric-font fallback.
+        const caps = await captureEmbeddedFonts(pdfPage, lines.map((l) => l.fontName));
+        if (cancelled || caps.size === 0) return;
+        const enriched = lines.map((l) => {
+          const cap = caps.get(l.fontName);
+          if (!cap) return l;
+          const id = `${pageSourceKey}#${pageSourceIndex}#${l.fontName}`;
+          registerEmbeddedFont({ id, data: cap.data, mimetype: cap.mimetype });
+          return { ...l, embeddedFontId: id };
+        });
+        if (!cancelled) setRuns(enriched);
       } catch {
         if (!cancelled) setRuns([]);
       }
@@ -180,7 +200,7 @@ export function PageCanvas() {
     if (!area) return;
     const st = useStore.getState();
     const old = st.zoom;
-    const next = Math.max(0.25, Math.min(4, Number((old * factor).toFixed(2))));
+    const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number((old * factor).toFixed(2))));
     if (next === old) return;
     const rect = area.getBoundingClientRect();
     const ax = clientX - rect.left + area.scrollLeft;
@@ -508,7 +528,7 @@ export function PageCanvas() {
       opacity: 1,
       z: nextZ(page),
       text: run.str,
-      family: run.family,
+      family: run.family, // metric fallback if the original font can't be embedded
       size: run.fontSize,
       bold: run.bold,
       italic: run.italic,
@@ -516,6 +536,7 @@ export function PageCanvas() {
       align: 'left',
       lineHeight: 1.15,
       coverColor, // hides the original glyphs on screen and on export
+      embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
     };
     addElement(page.id, el); // commits history + selects the new element
     setEditingId(el.id); // open the editor right away (text pre-selected, ready to type)
@@ -557,7 +578,10 @@ export function PageCanvas() {
               pageId={page.id}
               scale={scale}
               editing={editingId === el.id}
-              interactive={activeTool === 'select' || editingId === el.id}
+              // Text stays clickable in scan mode so an in-place edit can be
+              // re-opened (clicking a covered line edits the existing field again).
+              interactive={activeTool === 'select' || editingId === el.id || (activeTool === 'edit-text' && el.type === 'text')}
+              editTextMode={activeTool === 'edit-text'}
               onStartEdit={() => startEditElement(el.id)}
               onEndEdit={endTextEdit}
               updateElement={updateElement}
@@ -621,7 +645,7 @@ function RunBox({ run, scale, onEdit }: { run: TextRun; scale: number; onEdit: (
     top: run.y * scale,
     width: Math.max(run.width, 24) * scale,
     height: run.height * scale,
-    fontFamily: cssStackFor(run.family),
+    fontFamily: embeddedFontFamily(run.embeddedFontId) ?? cssStackFor(run.family),
     fontSize: run.fontSize * scale,
     fontWeight: run.bold ? 700 : 400,
     fontStyle: run.italic ? 'italic' : 'normal',

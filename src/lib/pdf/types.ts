@@ -150,6 +150,8 @@ export interface TextRun {
   italic: boolean;
   /** pdf.js internal font name, used for embedded-font extraction */
   fontName: string;
+  /** id of the captured original font (see embeddedFonts.ts), when embedded */
+  embeddedFontId?: string;
 }
 
 /** A fillable AcroForm field. */

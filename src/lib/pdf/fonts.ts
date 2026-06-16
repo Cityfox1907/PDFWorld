@@ -2,6 +2,14 @@ import { StandardFonts } from 'pdf-lib';
 import type { BaseFamily, FontFamilyKey } from './types';
 
 /**
+ * Where a line's baseline sits below the top of its glyph box, as a fraction of
+ * the font size. Shared by the text extractor (render.ts) and the bake layer
+ * (bake.ts) so a scanned line is re-drawn on EXACTLY its original baseline —
+ * keeping replaced text in the same vertical position as the original glyphs.
+ */
+export const BASELINE_RATIO = 0.8;
+
+/**
  * Map a base family + style to one of the 14 PDF standard fonts.
  * The standard fonts are metric-similar to Arial/Times/Courier and cover the full
  * WinAnsi range (incl. German umlauts, ß and €), so they reproduce the vast majority

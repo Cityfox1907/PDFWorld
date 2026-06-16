@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
-import { cssStackFor, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
+import { cssStackFor, embeddedFontFamily, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 type Handle = (typeof HANDLES)[number];
@@ -12,19 +12,30 @@ interface Props {
   editing: boolean;
   /** whether the element responds to pointer input (move/resize/select/edit) */
   interactive: boolean;
+  /** in the scan tool a single click on text re-opens its in-place editor */
+  editTextMode?: boolean;
   onStartEdit: () => void;
   onEndEdit: () => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   commit: () => void;
 }
 
-export function ElementView({ el, pageId, scale, editing, interactive, onStartEdit, onEndEdit, updateElement, commit }: Props) {
+export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, onStartEdit, onEndEdit, updateElement, commit }: Props) {
   const selectedId = useStore((s) => s.selectedElementId);
   const selectElement = useStore((s) => s.selectElement);
   const selected = selectedId === el.id && interactive;
 
   const startMove = (e: React.PointerEvent) => {
     if (!interactive || editing) return;
+    // In the scan tool, clicking text re-opens its editor instead of moving it,
+    // so an already-edited line can be corrected again.
+    if (editTextMode && el.type === 'text') {
+      e.stopPropagation();
+      e.preventDefault(); // keep focus so the editor we open doesn't blur instantly
+      selectElement(el.id);
+      onStartEdit();
+      return;
+    }
     e.stopPropagation();
     selectElement(el.id);
     const startX = e.clientX;
@@ -143,7 +154,8 @@ function ElementBody({
     case 'text': {
       const t = el as TextElement;
       const textStyle: React.CSSProperties = {
-        fontFamily: cssStackFor(t.family),
+        // Prefer the captured original typeface so an in-place edit looks identical.
+        fontFamily: embeddedFontFamily(t.embeddedFontId) ?? cssStackFor(t.family),
         fontSize: t.size * scale,
         fontWeight: t.bold ? 700 : 400,
         fontStyle: t.italic ? 'italic' : 'normal',

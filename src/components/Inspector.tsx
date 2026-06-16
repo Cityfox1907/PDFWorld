@@ -1,24 +1,7 @@
 import { useStore } from '../state/store';
-import { FONT_CATALOG, cssStackFor, type AnyElement, type ElementPatch, type TextElement, type FontFamilyKey } from '../lib/pdf';
+import type { AnyElement, ElementPatch, TextElement } from '../lib/pdf';
+import { FontPicker } from './FontPicker';
 import { Bold, Italic, AlignLeft, AlignCenter, AlignRight, Copy, BringToFront, SendToBack, Trash2 } from 'lucide-react';
-
-/** Rich font picker: 40 catalogue fonts, each option previewed in its own typeface. */
-function FontSelect({ value, onChange }: { value: FontFamilyKey; onChange: (key: FontFamilyKey) => void }) {
-  return (
-    <select
-      className="field font-select"
-      value={value}
-      style={{ fontFamily: cssStackFor(value) }}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {FONT_CATALOG.map((f) => (
-        <option key={f.key} value={f.key} style={{ fontFamily: cssStackFor(f.key) }}>
-          {f.label}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -129,8 +112,7 @@ export function Inspector() {
       return (
         <Group title="Text-Werkzeug">
           <Row>
-            <label>Schrift</label>
-            <FontSelect value={tool.textFamily} onChange={(textFamily) => setToolDefaults({ textFamily })} />
+            <FontPicker value={tool.textFamily} onChange={(textFamily) => setToolDefaults({ textFamily })} />
           </Row>
           <Row>
             <label>Grösse</label>
@@ -231,18 +213,20 @@ export function Inspector() {
 }
 
 function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => void }) {
+  // Picking a font or toggling weight/style is an explicit override, so drop the
+  // captured original-font binding and let the chosen family/style take effect.
   return (
     <Group title="Text">
       <Row>
-        <FontSelect value={el.family} onChange={(family) => set({ family })} />
+        <FontPicker value={el.family} onChange={(family) => set({ family, embeddedFontId: undefined })} />
       </Row>
       <Row>
         <input className="field" type="number" value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />
         <input className="swatch" type="color" value={el.color} onChange={(e) => set({ color: e.target.value })} />
-        <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold })}>
+        <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold, embeddedFontId: undefined })}>
           <Bold size={15} />
         </button>
-        <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic })}>
+        <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic, embeddedFontId: undefined })}>
           <Italic size={15} />
         </button>
       </Row>

@@ -1,11 +1,14 @@
 import { useEffect } from 'react';
 import { useStore } from '../state/store';
+import { useUI } from '../state/ui';
 import { TopBar } from './TopBar';
 import { ToolRail } from './ToolRail';
 import { PageSidebar } from './PageSidebar';
 import { PageCanvas } from './PageCanvas';
 import { Inspector } from './Inspector';
 import { SignatureModal } from './SignatureModal';
+import { SaveDialog } from './SaveDialog';
+import { PageOrganizer } from './PageOrganizer';
 
 export function Workspace() {
   const undo = useStore((s) => s.undo);
@@ -14,7 +17,7 @@ export function Workspace() {
   const selectedElementId = useStore((s) => s.selectedElementId);
   const currentPageId = useStore((s) => s.currentPageId);
   const deleteElement = useStore((s) => s.deleteElement);
-  const exportPdf = useStore((s) => s.exportPdf);
+  const openSaveDialog = useUI((s) => s.openSaveDialog);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -35,7 +38,7 @@ export function Workspace() {
       }
       if (mod && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        void exportPdf();
+        openSaveDialog();
         return;
       }
       if (typing) return;
@@ -60,7 +63,7 @@ export function Workspace() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, setTool, selectedElementId, currentPageId, deleteElement, exportPdf]);
+  }, [undo, redo, setTool, selectedElementId, currentPageId, deleteElement, openSaveDialog]);
 
   return (
     <div className="workspace">
@@ -72,6 +75,8 @@ export function Workspace() {
         <Inspector />
       </div>
       <SignatureModal />
+      <SaveDialog />
+      <PageOrganizer />
     </div>
   );
 }

@@ -54,7 +54,6 @@ export function Workspace() {
         r: 'rect',
         o: 'ellipse',
         b: 'redact',
-        f: 'forms',
       };
       const tool = map[e.key.toLowerCase()];
       if (tool) setTool(tool);

@@ -1,13 +1,24 @@
 import { useStore } from '../state/store';
-import type { AnyElement, ElementPatch, TextElement, FontFamilyKey } from '../lib/pdf';
-import { FormPanel } from './FormPanel';
+import { FONT_CATALOG, cssStackFor, type AnyElement, type ElementPatch, type TextElement, type FontFamilyKey } from '../lib/pdf';
 import { Bold, Italic, AlignLeft, AlignCenter, AlignRight, Copy, BringToFront, SendToBack, Trash2 } from 'lucide-react';
 
-const FAMILIES: { id: FontFamilyKey; label: string }[] = [
-  { id: 'sans', label: 'Sans (Helvetica/Arial)' },
-  { id: 'serif', label: 'Serif (Times)' },
-  { id: 'mono', label: 'Mono (Courier)' },
-];
+/** Rich font picker: 40 catalogue fonts, each option previewed in its own typeface. */
+function FontSelect({ value, onChange }: { value: FontFamilyKey; onChange: (key: FontFamilyKey) => void }) {
+  return (
+    <select
+      className="field font-select"
+      value={value}
+      style={{ fontFamily: cssStackFor(value) }}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {FONT_CATALOG.map((f) => (
+        <option key={f.key} value={f.key} style={{ fontFamily: cssStackFor(f.key) }}>
+          {f.label}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -34,14 +45,6 @@ export function Inspector() {
   const commit = useStore((s) => s.commit);
   const tool = useStore((s) => s.tool);
   const setToolDefaults = useStore((s) => s.setToolDefaults);
-
-  if (activeTool === 'forms') {
-    return (
-      <aside className="inspector">
-        <FormPanel />
-      </aside>
-    );
-  }
 
   const page = pages.find((p) => p.id === currentPageId);
   const el = page?.elements.find((e) => e.id === selectedId) ?? null;
@@ -127,13 +130,7 @@ export function Inspector() {
         <Group title="Text-Werkzeug">
           <Row>
             <label>Schrift</label>
-            <select className="field" value={tool.textFamily} onChange={(e) => setToolDefaults({ textFamily: e.target.value as FontFamilyKey })}>
-              {FAMILIES.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
+            <FontSelect value={tool.textFamily} onChange={(textFamily) => setToolDefaults({ textFamily })} />
           </Row>
           <Row>
             <label>Grösse</label>
@@ -237,13 +234,7 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
   return (
     <Group title="Text">
       <Row>
-        <select className="field" value={el.family} onChange={(e) => set({ family: e.target.value as FontFamilyKey })}>
-          {FAMILIES.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.label}
-            </option>
-          ))}
-        </select>
+        <FontSelect value={el.family} onChange={(family) => set({ family })} />
       </Row>
       <Row>
         <input className="field" type="number" value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />

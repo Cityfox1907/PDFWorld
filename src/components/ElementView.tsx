@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
-import { cssFontFor, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
+import { cssStackFor, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 type Handle = (typeof HANDLES)[number];
@@ -10,17 +10,17 @@ interface Props {
   pageId: string;
   scale: number;
   editing: boolean;
+  /** whether the element responds to pointer input (move/resize/select/edit) */
+  interactive: boolean;
   onStartEdit: () => void;
   onEndEdit: () => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   commit: () => void;
 }
 
-export function ElementView({ el, pageId, scale, editing, onStartEdit, onEndEdit, updateElement, commit }: Props) {
-  const activeTool = useStore((s) => s.activeTool);
+export function ElementView({ el, pageId, scale, editing, interactive, onStartEdit, onEndEdit, updateElement, commit }: Props) {
   const selectedId = useStore((s) => s.selectedElementId);
   const selectElement = useStore((s) => s.selectElement);
-  const interactive = activeTool === 'select';
   const selected = selectedId === el.id && interactive;
 
   const startMove = (e: React.PointerEvent) => {
@@ -143,7 +143,7 @@ function ElementBody({
     case 'text': {
       const t = el as TextElement;
       const textStyle: React.CSSProperties = {
-        fontFamily: cssFontFor(t.family),
+        fontFamily: cssStackFor(t.family),
         fontSize: t.size * scale,
         fontWeight: t.bold ? 700 : 400,
         fontStyle: t.italic ? 'italic' : 'normal',

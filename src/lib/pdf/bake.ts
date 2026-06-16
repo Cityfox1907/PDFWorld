@@ -10,6 +10,7 @@ import {
 } from 'pdf-lib';
 import type { AnyElement, TextElement, RectElement, EllipseElement, HighlightElement, ImageElement, InkElement } from './types';
 import { standardFontFor } from './fonts';
+import { baseFamilyOf, fontFileUrl } from './fontCatalog';
 import { placeBox, axisAngleDeg, type ToPdfPoint } from './coords';
 
 /** Where the baseline sits below a line's top, as a fraction of the font size. */
@@ -48,16 +49,48 @@ function dataUrlToBytes(src: string): { bytes: Uint8Array; mime: string } {
  */
 export class Baker {
   private fontCache = new Map<string, PDFFont>();
+  private webFontCache = new Map<string, PDFFont | null>();
   private imageCache = new Map<string, PDFImage>();
+  private fontkitReady = false;
 
   constructor(private doc: PDFDocument) {}
 
   private async standardFont(el: TextElement): Promise<PDFFont> {
-    const key = standardFontFor(el.family, el.bold, el.italic);
+    const key = standardFontFor(baseFamilyOf(el.family), el.bold, el.italic);
     const cached = this.fontCache.get(key);
     if (cached) return cached;
     const font = await this.doc.embedFont(key as StandardFonts);
     this.fontCache.set(key, font);
+    return font;
+  }
+
+  /**
+   * Fetch + embed the chosen web font (subsetted) so the export matches the editor
+   * exactly. Returns null for the built-in standard families and whenever the font
+   * cannot be fetched or parsed — the caller then falls back to a standard font, so
+   * an offline export or a missing weight never breaks the document.
+   */
+  private async webFont(el: TextElement): Promise<PDFFont | null> {
+    const url = fontFileUrl(el.family, el.bold ? 700 : 400, el.italic);
+    if (!url) return null;
+    if (this.webFontCache.has(url)) return this.webFontCache.get(url) ?? null;
+
+    let font: PDFFont | null;
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (!this.fontkitReady) {
+        const fontkit = (await import('@pdf-lib/fontkit')).default;
+        this.doc.registerFontkit(fontkit);
+        this.fontkitReady = true;
+      }
+      font = await this.doc.embedFont(bytes, { subset: true });
+    } catch (err) {
+      console.warn('web font embed failed, using standard fallback:', el.family, err);
+      font = null;
+    }
+    this.webFontCache.set(url, font);
     return font;
   }
 
@@ -196,7 +229,10 @@ export class Baker {
       });
     }
 
-    const font = await this.standardFont(el);
+    // Prefer the real embedded web font; keep a standard font ready as a per-line
+    // fallback for glyphs an exotic subset cannot encode.
+    const webFont = await this.webFont(el);
+    const stdFont = await this.standardFont(el);
     const color = rgbColor(el.color);
     const lines = el.text.length ? el.text.split('\n') : [''];
 
@@ -206,35 +242,47 @@ export class Baker {
 
       const lineTop = el.y + i * el.size * el.lineHeight;
       const baselineY = lineTop + el.size * ASCENT_RATIO;
+      const x0 = lineX(el, line, webFont ?? stdFont);
+      const anchor = toPdfPoint(x0, baselineY);
+      const rotateDeg = axisAngleDeg(toPdfPoint, x0, baselineY);
 
-      let textWidth = 0;
+      const draw = (font: PDFFont, text: string) =>
+        page.drawText(text, {
+          x: anchor[0],
+          y: anchor[1],
+          size: el.size,
+          font,
+          color,
+          opacity: el.opacity,
+          rotate: degrees(rotateDeg),
+        });
+
       try {
-        textWidth = font.widthOfTextAtSize(line, el.size);
+        // Embedded web fonts carry their own glyphs (full Unicode); standard fonts
+        // are WinAnsi, so sanitise unsupported characters to keep them from throwing.
+        if (webFont) draw(webFont, line);
+        else draw(stdFont, sanitizeWinAnsi(line));
       } catch {
-        /* width stays 0 (alignment falls back to left) */
+        try {
+          draw(stdFont, sanitizeWinAnsi(line));
+        } catch {
+          /* a single unrenderable line must never abort the export */
+        }
       }
-
-      let lineX = el.x;
-      if (el.align === 'center') lineX = el.x + (el.width - textWidth) / 2;
-      else if (el.align === 'right') lineX = el.x + el.width - textWidth;
-
-      const anchor = toPdfPoint(lineX, baselineY);
-      const rotateDeg = axisAngleDeg(toPdfPoint, lineX, baselineY);
-
-      // StandardFonts are WinAnsi: replace characters they cannot encode so a single
-      // exotic glyph never throws and aborts the line.
-      const safe = sanitizeWinAnsi(line);
-      page.drawText(safe, {
-        x: anchor[0],
-        y: anchor[1],
-        size: el.size,
-        font,
-        color,
-        opacity: el.opacity,
-        rotate: degrees(rotateDeg),
-      });
     }
   }
+}
+
+/** Left edge of a line given the element's alignment, measured with the active font. */
+function lineX(el: TextElement, line: string, font: PDFFont): number {
+  if (el.align === 'left') return el.x;
+  let textWidth: number;
+  try {
+    textWidth = font.widthOfTextAtSize(line, el.size);
+  } catch {
+    return el.x; // measurement failed → fall back to left alignment
+  }
+  return el.align === 'center' ? el.x + (el.width - textWidth) / 2 : el.x + el.width - textWidth;
 }
 
 /** Replace characters outside the WinAnsi range so StandardFonts never throw. */

@@ -23,8 +23,7 @@ export type ToolId =
   | 'ellipse'
   | 'redact'
   | 'image'
-  | 'signature'
-  | 'forms';
+  | 'signature';
 
 export interface EditorPage {
   id: string;

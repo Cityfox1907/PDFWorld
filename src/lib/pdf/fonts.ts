@@ -1,13 +1,14 @@
 import { StandardFonts } from 'pdf-lib';
-import type { FontFamilyKey } from './types';
+import type { BaseFamily, FontFamilyKey } from './types';
 
 /**
- * Map a font descriptor (family + style) to one of the 14 PDF standard fonts.
+ * Map a base family + style to one of the 14 PDF standard fonts.
  * The standard fonts are metric-similar to Arial/Times/Courier and cover the full
  * WinAnsi range (incl. German umlauts, ß and €), so they reproduce the vast majority
- * of business documents faithfully with zero embedding cost.
+ * of business documents faithfully with zero embedding cost. They are also the
+ * fallback whenever a chosen web font cannot be fetched and embedded.
  */
-export function standardFontFor(family: FontFamilyKey, bold: boolean, italic: boolean): StandardFonts {
+export function standardFontFor(family: BaseFamily, bold: boolean, italic: boolean): StandardFonts {
   switch (family) {
     case 'serif':
       if (bold && italic) return StandardFonts.TimesRomanBoldItalic;
@@ -25,19 +26,6 @@ export function standardFontFor(family: FontFamilyKey, bold: boolean, italic: bo
       if (bold) return StandardFonts.HelveticaBold;
       if (italic) return StandardFonts.HelveticaOblique;
       return StandardFonts.Helvetica;
-  }
-}
-
-/** CSS font-family used to *preview* a family on screen (mirrors the standard font). */
-export function cssFontFor(family: FontFamilyKey): string {
-  switch (family) {
-    case 'serif':
-      return '"Times New Roman", Times, "Liberation Serif", serif';
-    case 'mono':
-      return '"Courier New", "Liberation Mono", ui-monospace, monospace';
-    case 'sans':
-    default:
-      return 'Helvetica, Arial, "Liberation Sans", system-ui, sans-serif';
   }
 }
 

@@ -1,12 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { FileUp, ScanText, Paintbrush, FormInput, Layers, ShieldCheck, Loader2 } from 'lucide-react';
+import { FileUp, ScanText, Paintbrush, Type, Layers, ShieldCheck, Loader2 } from 'lucide-react';
 
 const FEATURES = [
   { icon: ScanText, title: 'Text scannen & bearbeiten', desc: 'Bestehenden Text antippen — Schrift, Grösse, Stil und Farbe werden automatisch erkannt und übernommen.' },
   { icon: Paintbrush, title: 'Hintergrund-Pinsel', desc: 'Nimmt die exakte Hintergrundfarbe auf und überdeckt Inhalte unsichtbar.' },
-  { icon: Layers, title: 'Seiten verwalten & zoomen', desc: 'Zusammenführen, sortieren, drehen — und in der Übersicht in die Texte hineinzoomen.' },
-  { icon: FormInput, title: 'Formulare & Signatur', desc: 'Formularfelder ausfüllen, unterschreiben und Bilder platzieren.' },
+  { icon: Layers, title: 'Seiten verwalten & zoomen', desc: 'Zusammenführen, sortieren, drehen — und flüssig, scharf in die Seite hineinzoomen.' },
+  { icon: Type, title: '40 Schriftarten & Signatur', desc: 'Aus 40 beliebten Schriften wählen, unterschreiben und Bilder platzieren.' },
 ];
 
 export function Home() {

@@ -3,18 +3,22 @@ import { useStore, visibleSize, type EditorPage } from '../state/store';
 import {
   renderPageToCanvas,
   extractTextRuns,
-  captureEmbeddedFonts,
+  inspectFonts,
   groupRunsIntoLines,
   registerEmbeddedFont,
   embeddedFontFamily,
   cssStackFor,
+  BASELINE_RATIO,
   type AnyElement,
+  type ElementPatch,
   type TextElement,
   type TextRun,
 } from '../lib/pdf';
 import { sampleBackground, sampleTextColor, sampleColorAt } from '../lib/utils/color';
+import { nearestBaseline } from '../lib/utils/align';
 import { uid } from '../lib/utils/id';
 import { ElementView } from './ElementView';
+import { Type, Check, X } from 'lucide-react';
 
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2.5);
 // Caps that keep the page bitmap inside every browser's canvas limits, so even an
@@ -50,6 +54,17 @@ export function PageCanvas() {
   const [draft, setDraft] = useState<AnyElement | null>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [scanId, setScanId] = useState(0);
+  // Scan tool: the line whose font panel is open, plus its sampled colours.
+  const [pickedRun, setPickedRun] = useState<number | null>(null);
+  const [pickInfo, setPickInfo] = useState<{ color: string; bg: string } | null>(null);
+  // Active alignment guide (a baseline in view-points) shown while moving text.
+  const [alignGuideY, setAlignGuideY] = useState<number | null>(null);
+  // Baselines of the last scanned lines, kept across tool switches for snapping.
+  const [scanBaselines, setScanBaselines] = useState<number[]>([]);
+  // Coalesces a burst of arrow-key nudges into a single undo step: the element id
+  // whose burst is in progress, and the timer that ends the burst after a pause.
+  const nudgeActiveId = useRef<string | null>(null);
+  const nudgeTimer = useRef<number | null>(null);
 
   const rotation = page ? (((page.baseRotation + page.addedRotation) % 360) + 360) % 360 : 0;
   const view = page ? visibleSize(page) : { width: 1, height: 1 };
@@ -59,6 +74,9 @@ export function PageCanvas() {
   const pageId = page?.id;
   useEffect(() => {
     setEditingId(null);
+    setPickedRun(null);
+    setAlignGuideY(null);
+    setScanBaselines([]);
   }, [pageId]);
 
   // Fit the page to the available area whenever the page or viewport changes.
@@ -160,6 +178,7 @@ export function PageCanvas() {
   useEffect(() => {
     if (activeTool !== 'edit-text' || pageSourceKey === undefined || pageSourceIndex === undefined || pageBlank) {
       setRuns([]);
+      setPickedRun(null);
       return;
     }
     let cancelled = false;
@@ -170,19 +189,27 @@ export function PageCanvas() {
         if (cancelled) return;
         const lines = groupRunsIntoLines(r);
         setRuns(lines); // show the clickable boxes immediately
+        setPickedRun(null);
         setScanId((n) => n + 1); // replay the scan sweep once per real scan
+        // Remember each line's baseline so a moved text box can snap onto it.
+        setScanBaselines(lines.map((l) => l.y + l.fontSize * BASELINE_RATIO));
 
-        // Then capture the ORIGINAL embedded fonts and attach them, so clicking a
-        // line edits it in its real typeface (on screen and on export). Best-effort:
-        // lines whose font isn't embedded simply keep the metric-font fallback.
-        const caps = await captureEmbeddedFonts(pdfPage, lines.map((l) => l.fontName));
-        if (cancelled || caps.size === 0) return;
+        // Then inspect each line's font: confirm whether the PDF embeds it (so it
+        // can be reused 1:1) and attach the ORIGINAL program when it does. The
+        // readable name already comes from extractTextRuns; commonObjs is a fallback.
+        // Always records `embedded` (even when nothing resolves) so the panel never
+        // stays stuck on the neutral "checking" badge.
+        const infos = await inspectFonts(pdfPage, lines.map((l) => l.fontName));
+        if (cancelled) return;
         const enriched = lines.map((l) => {
-          const cap = caps.get(l.fontName);
-          if (!cap) return l;
-          const id = `${pageSourceKey}#${pageSourceIndex}#${l.fontName}`;
-          registerEmbeddedFont({ id, data: cap.data, mimetype: cap.mimetype });
-          return { ...l, embeddedFontId: id };
+          const info = infos.get(l.fontName);
+          let embeddedFontId = l.embeddedFontId;
+          if (info?.embedded && info.data) {
+            const id = `${pageSourceKey}#${pageSourceIndex}#${l.fontName}`;
+            registerEmbeddedFont({ id, data: info.data, mimetype: info.mimetype || 'font/opentype' });
+            embeddedFontId = id;
+          }
+          return { ...l, fontLabel: l.fontLabel ?? info?.displayName, embedded: info?.embedded ?? false, embeddedFontId };
         });
         if (!cancelled) setRuns(enriched);
       } catch {
@@ -257,6 +284,75 @@ export function PageCanvas() {
     };
   }, [zoomAround]);
 
+  // Baselines a selected text box can snap to: scanned lines + other text boxes.
+  const getAlignTargets = useCallback(
+    (excludeId: string | null): number[] => {
+      const ts = [...scanBaselines];
+      if (page) {
+        for (const el of page.elements) {
+          if (el.type === 'text' && el.id !== excludeId) ts.push(el.y + el.size * BASELINE_RATIO);
+        }
+      }
+      return ts;
+    },
+    [page, scanBaselines],
+  );
+
+  // Arrow keys nudge the selected element for precise alignment (Shift = 10 pt).
+  // A vertical nudge snaps a text box onto a neighbouring baseline; hold Alt to
+  // bypass the snap. Ignored while typing in a text box or any input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!page || editingId) return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      const selId = useStore.getState().selectedElementId;
+      if (!selId) return;
+      const target = page.elements.find((el) => el.id === selId);
+      if (!target) return;
+      e.preventDefault();
+      const step = e.shiftKey ? 10 : 1;
+      let nx = target.x;
+      let ny = target.y;
+      if (e.key === 'ArrowLeft') nx -= step;
+      else if (e.key === 'ArrowRight') nx += step;
+      else if (e.key === 'ArrowUp') ny -= step;
+      else ny += step;
+
+      let guide: number | null = null;
+      if (target.type === 'text' && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const snap = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), 4);
+        if (snap != null) {
+          ny = snap - target.size * BASELINE_RATIO;
+          guide = snap;
+        }
+      }
+      // Snapshot once at the start of a burst (or when the target changes) so a
+      // single undo reverts the whole run of nudges — matching addElement's model.
+      if (nudgeActiveId.current !== selId) {
+        commit();
+        nudgeActiveId.current = selId;
+      }
+      const patch: ElementPatch = { x: nx, y: ny };
+      if (target.type === 'ink') {
+        const dx = nx - target.x;
+        const dy = ny - target.y;
+        patch.points = target.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+      }
+      updateElement(page.id, selId, patch);
+      setAlignGuideY(guide);
+      // End the burst (and clear the guide) after a short pause.
+      if (nudgeTimer.current) window.clearTimeout(nudgeTimer.current);
+      nudgeTimer.current = window.setTimeout(() => {
+        nudgeActiveId.current = null;
+        setAlignGuideY(null);
+      }, 500);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [page, editingId, updateElement, commit, getAlignTargets]);
+
   const evToView = (e: { clientX: number; clientY: number }) => {
     const rect = overlayRef.current!.getBoundingClientRect();
     return { x: (e.clientX - rect.left) / scale, y: (e.clientY - rect.top) / scale };
@@ -281,6 +377,7 @@ export function PageCanvas() {
     if (activeTool === 'edit-text') {
       // Clicking empty space leaves the current in-place edit; the line boxes stay.
       setEditingId(null);
+      setPickedRun(null);
       selectElement(null);
       return;
     }
@@ -504,20 +601,37 @@ export function PageCanvas() {
   const isAbandonedText = (el: AnyElement | undefined): boolean =>
     !!el && el.type === 'text' && !el.text.trim() && !el.coverColor;
 
-  // ── scan tool: turn a detected line into an in-place, immediately-editable field ──
-  // Clicking a line samples its real text colour and the page background behind it,
-  // then drops a text element that *covers* the original glyphs and opens straight in
-  // edit mode. The inspector instantly shows font, size, colour & style for it.
-  const editRun = (idx: number) => {
-    const run = runs[idx];
-    if (!run || !page) return;
+  // ── scan tool: inspect a detected line, then adopt its exact typeface ──
+  // Sample the line's real text colour and the page background directly from the
+  // rendered canvas. Sampling uses the canvas's ACTUAL pixels-per-view-point (it may
+  // be rendered at a capped resolution at high zoom, so scale·DPR would mis-point).
+  const sampleRun = (run: TextRun): { color: string; bg: string } => {
     const canvas = canvasRef.current;
     const box = { x: run.x, y: run.y, width: Math.max(run.width, 24), height: run.height };
-    // Sample at the canvas's *actual* pixels-per-view-point (it may be rendered at a
-    // capped resolution at high zoom, so scale·DPR would point at the wrong pixels).
     const px = canvas ? canvas.width / view.width : scale * DPR;
-    const coverColor = canvas ? sampleBackground(canvas, box, px) : '#ffffff';
-    const color = canvas ? sampleTextColor(canvas, box, px) : '#111111';
+    return {
+      color: canvas ? sampleTextColor(canvas, box, px) : '#111111',
+      bg: canvas ? sampleBackground(canvas, box, px) : '#ffffff',
+    };
+  };
+
+  // Clicking a detected line opens its font panel (showing the real typeface, size,
+  // colour and whether it can be reused 1:1) instead of editing blindly.
+  const pickRun = (idx: number) => {
+    const run = runs[idx];
+    if (!run) return;
+    setPickInfo(sampleRun(run));
+    setPickedRun(idx);
+  };
+
+  // "Originalschrift übernehmen": drop a text box at the line, in its EXACT typeface,
+  // size, style and colour, pre-filled with the line's text and ready to edit. With
+  // `cover` it also hides the original glyphs (sampled background); without it the
+  // user covers the original themselves with the brush.
+  const adoptRun = (idx: number, cover: boolean) => {
+    const run = runs[idx];
+    if (!run || !page) return;
+    const { color, bg } = pickInfo ?? sampleRun(run);
     const el: TextElement = {
       id: uid('el'),
       type: 'text',
@@ -535,22 +649,22 @@ export function PageCanvas() {
       color,
       align: 'left',
       lineHeight: 1.15,
-      coverColor, // hides the original glyphs on screen and on export
+      coverColor: cover ? bg : undefined, // hides the original glyphs on screen + export
       embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
     };
     addElement(page.id, el); // commits history + selects the new element
+    setPickedRun(null);
     setEditingId(el.id); // open the editor right away (text pre-selected, ready to type)
   };
 
-  // A detected line is "consumed" once an in-place edit already covers it, so its
-  // clickable box never reappears (and a second edit can't stack on the first).
-  const runIsCovered = useCallback(
+  // A detected line is "consumed" once a text box has been adopted at its position,
+  // so its clickable box never reappears (and a second adopt can't stack on it).
+  const runIsTaken = useCallback(
     (run: TextRun) =>
       !!page &&
       page.elements.some(
         (e) =>
           e.type === 'text' &&
-          !!e.coverColor &&
           Math.abs(e.x - run.x) <= 2 &&
           Math.abs(e.y - run.y) <= Math.max(2, run.fontSize * 0.6),
       ),
@@ -582,6 +696,8 @@ export function PageCanvas() {
               // re-opened (clicking a covered line edits the existing field again).
               interactive={activeTool === 'select' || editingId === el.id || (activeTool === 'edit-text' && el.type === 'text')}
               editTextMode={activeTool === 'edit-text'}
+              alignBaselines={getAlignTargets(el.id)}
+              onAlignGuide={setAlignGuideY}
               onStartEdit={() => startEditElement(el.id)}
               onEndEdit={endTextEdit}
               updateElement={updateElement}
@@ -591,16 +707,32 @@ export function PageCanvas() {
 
           {draft && <DraftView el={draft} scale={scale} />}
 
+          {/* Alignment guide: a line at the baseline a text box is snapping to. */}
+          {alignGuideY != null && <div className="align-guide" style={{ top: alignGuideY * scale }} />}
+
           {activeTool === 'edit-text' && (
             <>
               {runs.length > 0 && <div key={scanId} className="scan-sweep" />}
               {runs.map((run, i) => {
-                if (runIsCovered(run)) return null;
-                return <RunBox key={i} run={run} scale={scale} onEdit={() => editRun(i)} />;
+                if (runIsTaken(run)) return null;
+                return <RunBox key={i} run={run} scale={scale} active={pickedRun === i} onPick={() => pickRun(i)} />;
               })}
             </>
           )}
         </div>
+
+        {/* Font panel for the picked line — sits above the overlay so it isn't clipped. */}
+        {activeTool === 'edit-text' && pickedRun != null && runs[pickedRun] && (
+          <FontInfoPanel
+            run={runs[pickedRun]}
+            scale={scale}
+            color={pickInfo?.color ?? '#111111'}
+            stageW={view.width * scale}
+            stageH={view.height * scale}
+            onAdopt={(cover) => adoptRun(pickedRun, cover)}
+            onClose={() => setPickedRun(null)}
+          />
+        )}
       </div>
     </div>
   );
@@ -634,12 +766,12 @@ function DraftView({ el, scale }: { el: AnyElement; scale: number }) {
 }
 
 /**
- * A clickable box over a detected line of existing PDF text. Clicking it hands the
- * line to `editRun`, which drops an in-place, immediately-editable text field on top
- * (matching font, size, style, colour and background). The box previews the line in
- * its own font and shows the detected point size on hover.
+ * A clickable box over a detected line of existing PDF text. Clicking it calls
+ * `pickRun`, which opens the font panel for the line (real typeface, size, style,
+ * colour and whether it is embedded). The box previews the line in its own font and
+ * shows the detected point size on hover.
  */
-function RunBox({ run, scale, onEdit }: { run: TextRun; scale: number; onEdit: () => void }) {
+function RunBox({ run, scale, active, onPick }: { run: TextRun; scale: number; active: boolean; onPick: () => void }) {
   const box: React.CSSProperties = {
     left: run.x * scale,
     top: run.y * scale,
@@ -652,18 +784,88 @@ function RunBox({ run, scale, onEdit }: { run: TextRun; scale: number; onEdit: (
   };
   return (
     <div
-      className="run-box"
+      className={`run-box ${active ? 'active' : ''}`}
       style={box}
       onPointerDown={(e) => {
         // preventDefault stops the browser's default focus-on-mousedown, which would
-        // otherwise immediately blur the in-place editor we open in onEdit().
+        // otherwise immediately blur an editor we open right after.
         e.preventDefault();
         e.stopPropagation();
-        onEdit();
+        onPick();
       }}
-      title={`„${run.str}“ · ${Math.round(run.fontSize)} pt · klicken zum Bearbeiten`}
+      title={`„${run.str}“ · ${Math.round(run.fontSize)} pt · klicken für Schrift-Infos`}
     >
       <span className="run-tag">{Math.round(run.fontSize)}</span>
+    </div>
+  );
+}
+
+/**
+ * Panel shown when a scanned line is clicked. It reveals the line's REAL typeface,
+ * size, style and colour, and whether the PDF embeds the font (so it can be reused
+ * 1:1). "Originalschrift übernehmen" drops a text box in exactly that font.
+ */
+function FontInfoPanel({
+  run,
+  scale,
+  color,
+  stageW,
+  stageH,
+  onAdopt,
+  onClose,
+}: {
+  run: TextRun;
+  scale: number;
+  color: string;
+  stageW: number;
+  stageH: number;
+  onAdopt: (cover: boolean) => void;
+  onClose: () => void;
+}) {
+  const previewFamily = embeddedFontFamily(run.embeddedFontId) ?? cssStackFor(run.family);
+  const width = 256;
+  const left = Math.max(4, Math.min(run.x * scale, stageW - width - 4));
+  const estH = 168;
+  const below = (run.y + run.height) * scale + 8;
+  const top = below + estH > stageH ? Math.max(4, run.y * scale - estH - 8) : below;
+  const styleBits = [run.bold ? 'Fett' : null, run.italic ? 'Kursiv' : null].filter(Boolean).join(' · ');
+
+  return (
+    <div className="font-panel" style={{ left, top, width }} onPointerDown={(e) => e.stopPropagation()}>
+      <div className="font-panel-head">
+        <Type size={14} />
+        <span>Erkannte Schrift</span>
+        <button className="font-panel-x" onClick={onClose} title="Schließen">
+          <X size={14} />
+        </button>
+      </div>
+      <div className="font-panel-name" style={{ fontFamily: previewFamily }}>
+        {run.fontLabel || 'Unbekannt'}
+      </div>
+      <div className={`font-panel-badge ${run.embedded === true ? 'ok' : run.embedded === false ? 'warn' : 'neutral'}`}>
+        {run.embedded === true ? (
+          <>
+            <Check size={13} /> Originalschrift verfügbar – exakt nutzbar
+          </>
+        ) : run.embedded === false ? (
+          <>nicht eingebettet – ähnlichste Schrift wird genutzt</>
+        ) : (
+          <>Schrift wird geprüft …</>
+        )}
+      </div>
+      <div className="font-panel-meta">
+        <span>{Math.round(run.fontSize)} pt</span>
+        {styleBits && <span>{styleBits}</span>}
+        <span className="font-panel-swatch" style={{ background: color }} title={color} />
+      </div>
+      <div className="font-panel-actions">
+        <button className="btn primary" onClick={() => onAdopt(true)}>
+          Originalschrift übernehmen
+        </button>
+        <button className="btn ghost sm" onClick={() => onAdopt(false)} title="Feld ohne Hintergrund-Abdeckung einfügen">
+          ohne Abdeckung
+        </button>
+      </div>
     </div>
   );
 }

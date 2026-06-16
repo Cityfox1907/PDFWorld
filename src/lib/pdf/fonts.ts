@@ -66,6 +66,22 @@ export function classifyFont(rawName: string | undefined | null): {
 }
 
 /**
+ * Turn the raw PDF font name pdf.js reports (e.g. "ABCDEE+TimesNewRomanPS-BoldMT")
+ * into a readable label for the scan editor's font panel. Strips the 6-letter
+ * subset prefix and the PostScript "MT"/"PS" suffixes, and normalises separators.
+ * Never empty — falls back to the raw name so the user always sees *something*.
+ */
+export function prettyFontName(rawName: string | undefined | null): string {
+  let s = (rawName ?? '').trim();
+  if (!s) return 'Unbekannt';
+  s = s.replace(/^[A-Z]{6}\+/, ''); // drop subset prefix "ABCDEE+"
+  s = s.replace(/[-_]+/g, ' '); // separators → spaces
+  s = s.replace(/PSMT\b/g, '').replace(/MT\b/g, '').replace(/PS\b/g, ''); // PostScript suffixes
+  s = s.replace(/\s+/g, ' ').trim();
+  return s || (rawName ?? 'Unbekannt');
+}
+
+/**
  * Store for embedded font programs extracted from a source PDF (via pdf.js).
  * Lets in-place text edits reuse the *original* glyphs when extraction succeeds.
  */

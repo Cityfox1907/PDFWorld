@@ -62,6 +62,7 @@ export function Inspector() {
               <input type="range" min={10} max={100} value={Math.round(el.opacity * 100)} onChange={(e) => set({ opacity: Number(e.target.value) / 100 }, false)} onMouseUp={commit} />
               <span className="insp-val">{Math.round(el.opacity * 100)}%</span>
             </Row>
+            <p className="insp-hint">Pfeiltasten verschieben um 1 pt (Shift: 10 pt). Text rastet auf der Nachbar-Grundlinie ein.</p>
           </Group>
 
           {el.type === 'text' && <TextProps el={el} set={set} />}
@@ -197,9 +198,14 @@ export function Inspector() {
       return (
         <Group title="Text scannen">
           <p className="insp-hint">
-            Erkannte Textzeilen werden markiert. Klicke auf eine Zeile, um sie direkt zu
-            bearbeiten — Schrift, Grösse, Stil, Farbe und Hintergrund werden automatisch
-            übernommen, sodass kein Unterschied sichtbar bleibt.
+            Erkannte Textzeilen werden markiert. Klicke auf eine Zeile, um ihre echte
+            Schrift zu sehen — Name, Grösse, Stil, Farbe und ob die Originalschrift
+            eingebettet ist. Mit <strong>„Originalschrift übernehmen“</strong> wird ein
+            Textfeld in exakt dieser Schrift eingefügt.
+          </p>
+          <p className="insp-hint">
+            Tipp: Mit den Pfeiltasten verschiebst du ein Feld pixelgenau; beim Bewegen
+            rastet es auf der Grundlinie der Nachbarzeile ein (Alt hält frei).
           </p>
         </Group>
       );
@@ -220,6 +226,7 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
       <Row>
         <FontPicker value={el.family} onChange={(family) => set({ family, embeddedFontId: undefined })} />
       </Row>
+      {el.embeddedFontId && <p className="insp-hint" style={{ margin: '0 0 2px' }}>✓ Originalschrift des Dokuments (1:1)</p>}
       <Row>
         <input className="field" type="number" value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />
         <input className="swatch" type="color" value={el.color} onChange={(e) => set({ color: e.target.value })} />

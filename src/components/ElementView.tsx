@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
-import { cssStackFor, embeddedFontFamily, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
+import { cssStackFor, embeddedFontFamily, BASELINE_RATIO, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
+import { nearestBaseline } from '../lib/utils/align';
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 type Handle = (typeof HANDLES)[number];
@@ -14,13 +15,17 @@ interface Props {
   interactive: boolean;
   /** in the scan tool a single click on text re-opens its in-place editor */
   editTextMode?: boolean;
+  /** baselines (view-points) a dragged text box may snap to for alignment */
+  alignBaselines?: number[];
+  /** report the active alignment guide while dragging (null clears it) */
+  onAlignGuide?: (y: number | null) => void;
   onStartEdit: () => void;
   onEndEdit: () => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   commit: () => void;
 }
 
-export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, onStartEdit, onEndEdit, updateElement, commit }: Props) {
+export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, alignBaselines, onAlignGuide, onStartEdit, onEndEdit, updateElement, commit }: Props) {
   const selectedId = useStore((s) => s.selectedElementId);
   const selectElement = useStore((s) => s.selectElement);
   const selected = selectedId === el.id && interactive;
@@ -47,13 +52,27 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       const dx = (ev.clientX - startX) / scale;
       const dy = (ev.clientY - startY) / scale;
       if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
-      const patch: ElementPatch = { x: origin.x + dx, y: origin.y + dy };
-      if (inkPoints) patch.points = inkPoints.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+      let y = origin.y + dy;
+      // Snap a text box vertically onto a neighbouring line's baseline so adjacent
+      // texts line up. A held Alt key bypasses the snap for free positioning.
+      let guide: number | null = null;
+      if (el.type === 'text' && !ev.altKey && alignBaselines && alignBaselines.length) {
+        const size = (el as TextElement).size;
+        const snap = nearestBaseline(y + size * BASELINE_RATIO, alignBaselines, 6 / scale);
+        if (snap != null) {
+          y = snap - size * BASELINE_RATIO;
+          guide = snap;
+        }
+      }
+      onAlignGuide?.(guide);
+      const patch: ElementPatch = { x: origin.x + dx, y };
+      if (inkPoints) patch.points = inkPoints.map((p) => ({ x: p.x + dx, y: p.y + (y - origin.y) }));
       updateElement(pageId, el.id, patch);
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      onAlignGuide?.(null);
       if (moved) commit();
     };
     window.addEventListener('pointermove', move);

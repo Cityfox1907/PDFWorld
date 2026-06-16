@@ -20,14 +20,20 @@ die bestehenden Seiten eingezeichnet.
 
 ### 2. Bearbeitung
 - **Text scannen & bearbeiten** – ein Scan erkennt jede Textzeile und bündelt sie
-  zu klickbaren Blöcken. Beim Antippen wird die **Originalschrift** des Dokuments
-  wiederverwendet (sofern eingebettet) – am Bildschirm wie beim Export – sodass die
-  Änderung 1:1 identisch aussieht. Grösse, Stil, Farbe und Hintergrund werden
-  ebenfalls übernommen; nach dem Bearbeiten lässt sich dieselbe Zeile erneut antippen
+  zu klickbaren Blöcken. Beim Antippen zeigt ein **Schrift-Panel** den echten
+  Schriftnamen, Grösse, Stil und Farbe der Zeile und ob die **Originalschrift**
+  eingebettet (und damit 1:1 nutzbar) ist. Mit **„Originalschrift übernehmen“** wird
+  ein Textfeld in exakt dieser Schrift eingefügt – am Bildschirm wie beim Export
+  identisch; Grösse, Stil, Farbe (und optional der Hintergrund) werden mitübernommen
+- **Pixelgenaue Ausrichtung** – ausgewählte Felder lassen sich mit den **Pfeiltasten**
+  verschieben (1 pt, mit Shift 10 pt); beim Bewegen rastet ein Textfeld auf der
+  **Grundlinie der Nachbarzeile** ein (sichtbare Hilfslinie, Alt hält frei), damit
+  nebeneinanderstehende Texte nie versetzt wirken
 - **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
   Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied
-- **Neuen Text** hinzufügen – Standardschrift **Arial**, Auswahl aus einem Font-Picker,
-  der jeden Namen in seiner eigenen Schrift zeigt (System-, Standard- & Web-Schriften)
+- **Neuen Text** hinzufügen – Standardschrift **Arial**, Auswahl aus einem Font-Picker
+  mit **~90 Schriften**, der jeden Namen in seiner eigenen Schrift zeigt (System-,
+  Standard- & Web-Schriften)
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
 - **Bilder** platzieren

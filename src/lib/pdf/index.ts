@@ -11,7 +11,7 @@ export type { ExportPageSpec, ExportOptions } from './pages';
 export { Baker } from './bake';
 export { makeToPdfPoint, placeBox, axisAngleDeg, snapRightAngle } from './coords';
 export type { ToPdfPoint, BoxPlacement } from './coords';
-export { standardFontFor, classifyFont, FontStore, BASELINE_RATIO } from './fonts';
+export { standardFontFor, classifyFont, prettyFontName, FontStore, BASELINE_RATIO } from './fonts';
 export {
   FONT_CATALOG,
   DEFAULT_FONT_KEY,
@@ -29,10 +29,10 @@ export {
   loadPdfjs,
   renderPageToCanvas,
   extractTextRuns,
-  captureEmbeddedFonts,
+  inspectFonts,
   groupRunsIntoLines,
   totalRotation,
   pageViewSize,
 } from './render';
-export type { PDFDocumentProxy, PDFPageProxy } from './render';
+export type { PDFDocumentProxy, PDFPageProxy, FontInspection } from './render';
 export * from './types';

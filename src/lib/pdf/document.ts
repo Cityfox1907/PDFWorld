@@ -1,6 +1,6 @@
 import { PDFDocument } from 'pdf-lib';
 import { loadPdfjs, type PDFDocumentProxy, type PDFPageProxy } from './render';
-import { readFields } from './forms';
+import { readFields, formDiagnostics } from './forms';
 import {
   exportRebuild,
   exportInPlace,
@@ -83,8 +83,19 @@ export class PdfEngine {
     if (!this.hasMain()) return [];
     try {
       return readFields(this.main.pdflib);
-    } catch {
+    } catch (err) {
+      console.warn('readFormFields failed', err);
       return [];
+    }
+  }
+
+  /** Why a form may show no editable fields (e.g. XFA-only documents). */
+  formInfo(): { acroFieldCount: number; hasXfa: boolean } {
+    if (!this.hasMain()) return { acroFieldCount: 0, hasXfa: false };
+    try {
+      return formDiagnostics(this.main.pdflib);
+    } catch {
+      return { acroFieldCount: 0, hasXfa: false };
     }
   }
 

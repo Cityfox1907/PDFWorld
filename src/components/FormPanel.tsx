@@ -7,6 +7,7 @@ export function FormPanel() {
   const setFormValue = useStore((s) => s.setFormValue);
   const flattenForm = useStore((s) => s.flattenForm);
   const setFlattenForm = useStore((s) => s.setFlattenForm);
+  const xfaForm = useStore((s) => s.xfaForm);
 
   if (!fields.length) {
     return (
@@ -14,8 +15,20 @@ export function FormPanel() {
         <div className="insp-title">Formular</div>
         <div className="form-empty">
           <FileText size={26} />
-          <p>Dieses PDF enthält keine interaktiven Formularfelder.</p>
-          <span className="insp-hint">Nutze stattdessen das Text-Werkzeug, um Felder manuell auszufüllen.</span>
+          {xfaForm ? (
+            <>
+              <p>Dieses PDF nutzt ein XFA-Formular (LiveCycle).</p>
+              <span className="insp-hint">
+                XFA-Felder lassen sich im Browser nicht direkt ausfüllen. Nutze das
+                Text-Werkzeug, um die Felder manuell zu beschriften.
+              </span>
+            </>
+          ) : (
+            <>
+              <p>Dieses PDF enthält keine interaktiven Formularfelder.</p>
+              <span className="insp-hint">Nutze stattdessen das Text-Werkzeug, um Felder manuell auszufüllen.</span>
+            </>
+          )}
         </div>
       </div>
     );

@@ -12,7 +12,7 @@ export { Baker } from './bake';
 export { makeToPdfPoint, placeBox, axisAngleDeg, snapRightAngle } from './coords';
 export type { ToPdfPoint, BoxPlacement } from './coords';
 export { standardFontFor, cssFontFor, classifyFont, FontStore } from './fonts';
-export { readFields, applyFieldValues, finalizeForm, hasForm } from './forms';
+export { readFields, applyFieldValues, finalizeForm, hasForm, formDiagnostics } from './forms';
 export {
   loadPdfjs,
   renderPageToCanvas,

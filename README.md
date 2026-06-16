@@ -1,0 +1,98 @@
+# PDFWorld
+
+Eine **Light-Version von Adobe Acrobat**, die vollständig im Browser läuft. PDFWorld
+bearbeitet PDFs **verlustfrei**: Originalinhalte (Text, Vektoren, Bilder) werden niemals
+rasterisiert oder neu komprimiert – Bearbeitungen werden als zusätzliche Ebene exakt in
+die bestehenden Seiten eingezeichnet.
+
+> 🔒 **100 % lokal.** Keine Uploads, kein Server. Jede Datei bleibt auf deinem Gerät.
+
+## Funktionen
+
+### 1. Seitenverwaltung (verlustfrei)
+- Mehrere PDFs **zusammenführen**
+- Seiten per **Drag & Drop sortieren**
+- Seiten **einfügen** (leer), **duplizieren**, **löschen**, **drehen**
+
+### 2. Bearbeitung
+- **Bestehenden Text bearbeiten** – die Schrift wird automatisch erkannt, der
+  Hintergrund hinter dem Original wird abgetastet und sauber überdeckt
+- **Neuen Text** in Sans-/Serif-/Mono-Schrift hinzufügen (fett, kursiv, Ausrichtung, Farbe)
+- **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
+- **Unterschrift** zeichnen oder als Bild hochladen
+- **Bilder** platzieren
+- **Markieren**, **freihändig zeichnen**, **Rechtecke/Ellipsen**, **Bereiche schwärzen**
+
+## Warum „ohne Qualitätsverlust"?
+
+Der entscheidende Unterschied zu vielen Web-Tools: PDFWorld **rendert Seiten nicht zu
+Bildern**. Stattdessen:
+
+- **pdf.js** rendert die Seiten nur zur *Anzeige* und extrahiert Textpositionen.
+- **pdf-lib** hält das echte Dokument. Beim Speichern werden Bearbeitungen als
+  zusätzliche Zeichenoperationen in die **unveränderten** Seiten-Streams eingebettet.
+- Seiten umsortieren/zusammenführen nutzt `copyPages` – Inhalte werden 1:1 kopiert.
+
+Dadurch bleiben Text scharf und durchsuchbar, Bilder in Originalauflösung und Vektoren
+gestochen – egal wie oft gespeichert wird.
+
+## Tech-Stack
+
+- **React 19 + TypeScript** (strict)
+- **Vite 8** Build, optimiert für **Vercel**
+- **pdf-lib** (Bearbeitung/Export) · **pdf.js** (Anzeige/Textextraktion) · **fontkit**
+- **Zustand** (State + Undo/Redo) · **dnd-kit** (Seiten-Sortierung) · **lucide-react** (Icons)
+
+## Entwicklung
+
+```bash
+npm install
+npm run dev          # Entwicklungsserver
+npm run build        # Produktionsbuild (tsc + vite) → dist/
+npm run preview      # Build lokal ansehen
+npm run typecheck    # strikter Typecheck
+npm run lint         # ESLint
+npm run test:engine  # Headless-Tests der PDF-Engine (Verlustfreiheit)
+```
+
+## Architektur
+
+```
+src/
+  lib/pdf/        Die PDF-Engine (DOM-frei + testbar)
+    document.ts   Engine: hält pdf-lib & pdf.js synchron, orchestriert Export
+    pages.ts      Seiten-Assemblierung (Reorder/Merge/Blank/Duplikat/Rotation)
+    bake.ts       Zeichnet Overlay-Elemente verlustfrei in die Seiten
+    coords.ts     View↔Content-Koordinaten inkl. Seitenrotation (0/90/180/270)
+    forms.ts      AcroForm lesen / ausfüllen / flatten
+    fonts.ts      Schrift-Klassifikation → Standardfonts
+    render.ts     pdf.js Rendering + Textextraktion
+  state/          Zustand-Stores (Dokument + UI)
+  components/     React-UI (Canvas, Sidebar, Inspector, …)
+scripts/
+  test-engine.ts  28 Headless-Tests, die die Verlustfreiheit beweisen
+```
+
+## Deployment (Vercel)
+
+Das Projekt ist als Vite-App vorkonfiguriert (`vercel.json`). Repository in Vercel
+importieren – Build-Command `npm run build`, Output `dist`. Da alles clientseitig läuft,
+wird kein Backend benötigt.
+
+## Bekannte Grenzen (ehrliche Einordnung)
+
+- **Schrift bei Textbearbeitung:** Ersetzter/neuer Text nutzt die metrisch sehr ähnlichen
+  Standardfonts (Helvetica/Times/Courier). Für Arial-/Times-/Courier-Dokumente praktisch
+  identisch; ein exotischer, eingebetteter Marken-Font wird durch die nächstliegende
+  Familie angenähert. Zeichen ausserhalb von WinAnsi werden ersetzt.
+- **Schwärzen** deckt Inhalte visuell ab (schwarzer Balken). Der darunterliegende Text
+  bleibt technisch im PDF – es ist **keine** sicherheitskritische Redaktion.
+- **Markieren** nutzt halbtransparente Flächen (kein echter Multiply-Blendmodus).
+- **Digitale Signaturen** im Originaldokument werden durch Bearbeitung ungültig (erwartetes
+  Verhalten beim Editieren).
+- Rotierte Seiten mit bereits gesetzten Annotationen: Annotationen werden beim Drehen nicht
+  mitgedreht (Rotation ist primär zum Geraderücken von Scans gedacht).
+
+---
+
+Entwickelt für maximale Qualität · *powered by Fiko*

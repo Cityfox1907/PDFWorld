@@ -1,0 +1,33 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# build output
+dist
+dist-ssr
+
+# local env
+*.local
+.env
+.env.*
+!.env.example
+
+# editor / os
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# tooling caches
+node_modules/.tmp
+.vercel
+*.tsbuildinfo
+
+# test artifacts
+scripts/.out

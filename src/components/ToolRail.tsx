@@ -16,7 +16,6 @@ import {
   Eraser,
   ImagePlus,
   PenTool,
-  FormInput,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -107,17 +106,6 @@ export function ToolRail() {
       <button className="rail-btn" onClick={openSignature} title="Unterschrift">
         <PenTool size={19} />
         <span className="rail-tip">Unterschrift</span>
-      </button>
-
-      <div className="rail-sep" />
-
-      <button
-        className={`rail-btn ${activeTool === 'forms' ? 'active' : ''}`}
-        onClick={() => setTool('forms')}
-        title="Formular ausfüllen · F"
-      >
-        <FormInput size={19} />
-        <span className="rail-tip">Formular</span>
       </button>
 
       <input

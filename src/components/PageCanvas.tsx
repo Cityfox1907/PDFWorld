@@ -4,7 +4,7 @@ import {
   renderPageToCanvas,
   extractTextRuns,
   groupRunsIntoLines,
-  cssFontFor,
+  cssStackFor,
   type AnyElement,
   type TextElement,
   type TextRun,
@@ -14,11 +14,10 @@ import { uid } from '../lib/utils/id';
 import { ElementView } from './ElementView';
 
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2.5);
-
-interface SampledColors {
-  cover: string;
-  text: string;
-}
+// Caps that keep the page bitmap inside every browser's canvas limits, so even an
+// extreme zoom renders softened-but-visible content instead of failing to all-white.
+const MAX_BITMAP_DIM = 8192;
+const MAX_BITMAP_AREA = 16_000_000;
 
 export function PageCanvas() {
   const pages = useStore((s) => s.pages);
@@ -44,9 +43,7 @@ export function PageCanvas() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AnyElement | null>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
-  const [editingRun, setEditingRun] = useState<number | null>(null);
   const [scanId, setScanId] = useState(0);
-  const [editColors, setEditColors] = useState<SampledColors>({ cover: '#ffffff', text: '#111111' });
 
   const rotation = page ? (((page.baseRotation + page.addedRotation) % 360) + 360) % 360 : 0;
   const view = page ? visibleSize(page) : { width: 1, height: 1 };
@@ -56,7 +53,6 @@ export function PageCanvas() {
   const pageId = page?.id;
   useEffect(() => {
     setEditingId(null);
-    setEditingRun(null);
   }, [pageId]);
 
   // Fit the page to the available area whenever the page or viewport changes.
@@ -76,45 +72,88 @@ export function PageCanvas() {
     return () => ro.disconnect();
   }, [page, view.width, view.height]);
 
-  // Render the page bitmap.
+  // ── Render the page bitmap ────────────────────────────────────────────────
+  // The visible canvas is always *styled* at view·scale, so during a zoom the
+  // previous bitmap is simply stretched (smooth, never blank). The crisp bitmap
+  // is rendered off-screen first and blitted in a single synchronous step — so
+  // the on-screen canvas is never cleared to white — and zoom re-renders are
+  // debounced so a fast pinch doesn't thrash pdf.js. The bitmap resolution is
+  // capped so a huge zoom can't blow past the browser's canvas limits.
+  const renderSigRef = useRef('');
   useEffect(() => {
-    let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas || !page) return;
-    if (page.blank) {
-      const ctx = canvas.getContext('2d');
-      canvas.width = Math.floor(view.width * scale * DPR);
-      canvas.height = Math.floor(view.height * scale * DPR);
+    let cancelled = false;
+
+    const cssW = view.width * scale;
+    const cssH = view.height * scale;
+
+    const renderNow = async () => {
+      if (cssW < 1 || cssH < 1) return;
+      let dpr = Math.min(DPR, MAX_BITMAP_DIM / cssW, MAX_BITMAP_DIM / cssH, Math.sqrt(MAX_BITMAP_AREA / (cssW * cssH)));
+      dpr = Math.max(0.5, dpr);
+
+      if (page.blank) {
+        const ctx = canvas.getContext('2d', { alpha: false });
+        canvas.width = Math.max(1, Math.round(cssW * dpr));
+        canvas.height = Math.max(1, Math.round(cssH * dpr));
+        if (ctx) {
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        return;
+      }
+
+      try {
+        const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
+        if (cancelled) return;
+        const off = document.createElement('canvas');
+        await renderPageToCanvas(pdfPage, off, scale * dpr, rotation);
+        if (cancelled) return;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) return;
+        // Resize + blit happen together: the on-screen canvas is never left blank.
+        canvas.width = off.width;
+        canvas.height = off.height;
+        ctx.drawImage(off, 0, 0);
+      } catch {
+        /* render race — a newer render superseded this one */
+      }
+    };
+
+    // Immediate for a page/rotation/size change; debounced for a pure zoom so the
+    // smooth stretched preview leads and the sharp re-render lands once settled.
+    const sig = `${page.id}|${rotation}|${Math.round(view.width)}x${Math.round(view.height)}`;
+    const onlyZoom = renderSigRef.current === sig;
+    renderSigRef.current = sig;
+
+    // On a genuine page/rotation change clear to white first, so the previous page
+    // never flashes stretched or mis-rotated into the new frame. A pure zoom keeps
+    // the old bitmap (stretched) for a seamless, flash-free transition.
+    if (!onlyZoom) {
+      const ctx = canvas.getContext('2d', { alpha: false });
       if (ctx) {
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
-      return;
     }
-    void (async () => {
-      try {
-        const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
-        if (cancelled) return;
-        await renderPageToCanvas(pdfPage, canvas, scale * DPR, rotation);
-      } catch {
-        /* render race */
-      }
-    })();
+
+    const t = window.setTimeout(() => void renderNow(), onlyZoom ? 120 : 0);
     return () => {
       cancelled = true;
+      window.clearTimeout(t);
     };
   }, [engine, page, scale, rotation, view.width, view.height]);
 
   // Load existing text runs when entering edit-text mode. Depends on the page
   // *source* (not its element list) so adding overlay edits never re-triggers a
-  // costly re-scan or wipes the line currently being edited.
+  // costly re-scan or wipes the boxes mid-edit.
   const pageSourceKey = page?.sourceKey;
   const pageSourceIndex = page?.sourceIndex;
   const pageBlank = page?.blank ?? false;
   useEffect(() => {
     if (activeTool !== 'edit-text' || pageSourceKey === undefined || pageSourceIndex === undefined || pageBlank) {
       setRuns([]);
-      setEditingRun(null);
       return;
     }
     let cancelled = false;
@@ -124,7 +163,6 @@ export function PageCanvas() {
         const r = await extractTextRuns(pdfPage, rotation);
         if (!cancelled) {
           setRuns(groupRunsIntoLines(r));
-          setEditingRun(null);
           setScanId((n) => n + 1); // replay the scan sweep once per real scan
         }
       } catch {
@@ -214,13 +252,21 @@ export function PageCanvas() {
       // Clicking empty space discards an abandoned, never-filled text box.
       const selId = useStore.getState().selectedElementId;
       if (selId) {
-        const selEl = page.elements.find((e) => e.id === selId);
+        const selEl = page.elements.find((el) => el.id === selId);
         if (isAbandonedText(selEl)) deleteElement(page.id, selId);
       }
       selectElement(null);
       return;
     }
+    if (activeTool === 'edit-text') {
+      // Clicking empty space leaves the current in-place edit; the line boxes stay.
+      setEditingId(null);
+      selectElement(null);
+      return;
+    }
     if (activeTool === 'text') {
+      // Keep focus for the editor we open below (see RunBox preventDefault note).
+      e.preventDefault();
       const el: TextElement = {
         id: uid('el'),
         type: 'text',
@@ -263,7 +309,9 @@ export function PageCanvas() {
     if (!page) return;
     const canvas = canvasRef.current;
     // Sample the exact colour directly under the cursor so the cover is invisible.
-    const color = canvas ? sampleColorAt(canvas, start.x, start.y, scale * DPR) : '#ffffff';
+    // Use the canvas's real pixel density (capped at high zoom) for accurate reads.
+    const px = canvas ? canvas.width / view.width : scale * DPR;
+    const color = canvas ? sampleColorAt(canvas, start.x, start.y, px) : '#ffffff';
     setToolDefaults({ brushColor: color });
     const width = tool.brushWidth;
     const points: { x: number; y: number }[] = [start];
@@ -436,45 +484,41 @@ export function PageCanvas() {
   const isAbandonedText = (el: AnyElement | undefined): boolean =>
     !!el && el.type === 'text' && !el.text.trim() && !el.coverColor;
 
-  // ── in-place editing of existing PDF text (scan tool) ──
-  const beginRunEdit = (idx: number) => {
-    const run = runs[idx];
-    const canvas = canvasRef.current;
-    if (run && canvas) {
-      const box = { x: run.x, y: run.y, width: Math.max(run.width, 24), height: run.height };
-      setEditColors({
-        cover: sampleBackground(canvas, box, scale * DPR),
-        text: sampleTextColor(canvas, box, scale * DPR),
-      });
-    }
-    setEditingRun(idx);
-  };
-
-  const commitRunEdit = (idx: number, newText: string) => {
-    setEditingRun(null);
+  // ── scan tool: turn a detected line into an in-place, immediately-editable field ──
+  // Clicking a line samples its real text colour and the page background behind it,
+  // then drops a text element that *covers* the original glyphs and opens straight in
+  // edit mode. The inspector instantly shows font, size, colour & style for it.
+  const editRun = (idx: number) => {
     const run = runs[idx];
     if (!run || !page) return;
-    if (newText === run.str) return; // unchanged — leave the original glyphs untouched
+    const canvas = canvasRef.current;
+    const box = { x: run.x, y: run.y, width: Math.max(run.width, 24), height: run.height };
+    // Sample at the canvas's *actual* pixels-per-view-point (it may be rendered at a
+    // capped resolution at high zoom, so scale·DPR would point at the wrong pixels).
+    const px = canvas ? canvas.width / view.width : scale * DPR;
+    const coverColor = canvas ? sampleBackground(canvas, box, px) : '#ffffff';
+    const color = canvas ? sampleTextColor(canvas, box, px) : '#111111';
     const el: TextElement = {
       id: uid('el'),
       type: 'text',
       x: run.x,
       y: run.y,
       width: Math.max(run.width, 24),
-      height: run.height,
+      height: Math.max(run.height, run.fontSize * 1.25),
       opacity: 1,
       z: nextZ(page),
-      text: newText,
+      text: run.str,
       family: run.family,
       size: run.fontSize,
       bold: run.bold,
       italic: run.italic,
-      color: editColors.text,
+      color,
       align: 'left',
       lineHeight: 1.15,
-      coverColor: editColors.cover, // hides the original glyphs on screen and on export
+      coverColor, // hides the original glyphs on screen and on export
     };
-    addElement(page.id, el);
+    addElement(page.id, el); // commits history + selects the new element
+    setEditingId(el.id); // open the editor right away (text pre-selected, ready to type)
   };
 
   // A detected line is "consumed" once an in-place edit already covers it, so its
@@ -513,6 +557,7 @@ export function PageCanvas() {
               pageId={page.id}
               scale={scale}
               editing={editingId === el.id}
+              interactive={activeTool === 'select' || editingId === el.id}
               onStartEdit={() => startEditElement(el.id)}
               onEndEdit={endTextEdit}
               updateElement={updateElement}
@@ -526,19 +571,8 @@ export function PageCanvas() {
             <>
               {runs.length > 0 && <div key={scanId} className="scan-sweep" />}
               {runs.map((run, i) => {
-                if (editingRun !== i && runIsCovered(run)) return null;
-                return (
-                  <RunBox
-                    key={i}
-                    run={run}
-                    scale={scale}
-                    editing={editingRun === i}
-                    colors={editColors}
-                    onEdit={() => beginRunEdit(i)}
-                    onCommit={(text) => commitRunEdit(i, text)}
-                    onCancel={() => setEditingRun(null)}
-                  />
-                );
+                if (runIsCovered(run)) return null;
+                return <RunBox key={i} run={run} scale={scale} onEdit={() => editRun(i)} />;
               })}
             </>
           )}
@@ -576,81 +610,30 @@ function DraftView({ el, scale }: { el: AnyElement; scale: number }) {
 }
 
 /**
- * Clickable box over an existing text run. Clicking turns it into an inline
- * textarea pre-filled with the original text (all selected, ready to retype) that
- * matches the font, size, style and colour and hides the original behind the
- * sampled background — so the edit blends in seamlessly.
+ * A clickable box over a detected line of existing PDF text. Clicking it hands the
+ * line to `editRun`, which drops an in-place, immediately-editable text field on top
+ * (matching font, size, style, colour and background). The box previews the line in
+ * its own font and shows the detected point size on hover.
  */
-function RunBox({
-  run,
-  scale,
-  editing,
-  colors,
-  onEdit,
-  onCommit,
-  onCancel,
-}: {
-  run: TextRun;
-  scale: number;
-  editing: boolean;
-  colors: SampledColors;
-  onEdit: () => void;
-  onCommit: (text: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(run.str);
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (editing) {
-      setValue(run.str);
-      // focus + select once on entering edit mode (not on every keystroke)
-      const ta = taRef.current;
-      if (ta) {
-        ta.focus();
-        ta.select();
-      }
-    }
-  }, [editing, run.str]);
-
+function RunBox({ run, scale, onEdit }: { run: TextRun; scale: number; onEdit: () => void }) {
   const box: React.CSSProperties = {
     left: run.x * scale,
     top: run.y * scale,
     width: Math.max(run.width, 24) * scale,
     height: run.height * scale,
-    fontFamily: cssFontFor(run.family),
+    fontFamily: cssStackFor(run.family),
     fontSize: run.fontSize * scale,
     fontWeight: run.bold ? 700 : 400,
     fontStyle: run.italic ? 'italic' : 'normal',
-    lineHeight: 1.15,
   };
-
-  if (editing) {
-    return (
-      <textarea
-        className="run-input"
-        ref={taRef}
-        value={value}
-        style={{ ...box, color: colors.text, background: colors.cover }}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={() => onCommit(value)}
-        onPointerDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            onCommit(value);
-          } else if (e.key === 'Escape') {
-            e.preventDefault();
-            onCancel();
-          }
-        }}
-      />
-    );
-  }
   return (
     <div
       className="run-box"
       style={box}
       onPointerDown={(e) => {
+        // preventDefault stops the browser's default focus-on-mousedown, which would
+        // otherwise immediately blur the in-place editor we open in onEdit().
+        e.preventDefault();
         e.stopPropagation();
         onEdit();
       }}

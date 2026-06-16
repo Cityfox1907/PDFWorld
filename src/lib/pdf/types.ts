@@ -10,7 +10,16 @@
  *     handled correctly and the original page content is never rasterised.
  */
 
-export type FontFamilyKey = 'sans' | 'serif' | 'mono';
+/** The three metric families that always map to an embeddable PDF standard font. */
+export type BaseFamily = 'sans' | 'serif' | 'mono';
+
+/**
+ * A font identity. This is a key into the font catalogue (see fontCatalog.ts):
+ * the three base families ('sans' | 'serif' | 'mono') plus the curated set of
+ * popular web fonts ('roboto', 'montserrat', …). Kept as a widened string so the
+ * catalogue can grow without touching the data model.
+ */
+export type FontFamilyKey = string;
 
 export type ElementType =
   | 'text'

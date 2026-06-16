@@ -3,7 +3,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 // Vite resolves this to a hashed URL and serves the worker as a module.
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { TextRun } from './types';
-import { classifyFont, BASELINE_RATIO } from './fonts';
+import { classifyFont, prettyFontName, BASELINE_RATIO } from './fonts';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -18,18 +18,34 @@ export async function loadPdfjs(data: Uint8Array): Promise<PDFDocumentProxy> {
   return task.promise;
 }
 
+/** What the scan editor learns about a page font: its name, whether the PDF
+ *  embeds it, and (when embedded) the raw program for 1:1 reuse. */
+export interface FontInspection {
+  /** raw PDF font name as pdf.js reports it (subset prefix included) */
+  rawName: string;
+  /** readable label for the UI (subset prefix + PostScript suffixes stripped) */
+  displayName: string;
+  /** true when the font program is embedded in the source PDF */
+  embedded: boolean;
+  /** the embedded font program — present only when `embedded` is true */
+  data?: Uint8Array;
+  /** mime type of `data`, e.g. "font/opentype" */
+  mimetype?: string;
+}
+
 /**
- * Capture the raw program of embedded fonts used on a page, keyed by the pdf.js
- * font name that `getTextContent` reports per run. Returns only fonts that are
- * actually embedded (standard/non-embedded fonts report `missingFile`). The
- * operator list is run once to guarantee the fonts are resolved into `commonObjs`.
- * Never throws — a failure just yields fewer (or no) captured fonts.
+ * Inspect the fonts used on a page, keyed by the pdf.js font name that
+ * `getTextContent` reports per run. For every requested font it reports the real
+ * name and whether the PDF embeds it; embedded fonts additionally carry their raw
+ * program so the editor can reuse the *original* typeface 1:1. The operator list
+ * is run once to guarantee the fonts are resolved into `commonObjs`.
+ * Never throws — a failure just yields fewer (or no) entries.
  */
-export async function captureEmbeddedFonts(
+export async function inspectFonts(
   page: PDFPageProxy,
   fontNames: string[],
-): Promise<Map<string, { data: Uint8Array; mimetype: string }>> {
-  const out = new Map<string, { data: Uint8Array; mimetype: string }>();
+): Promise<Map<string, FontInspection>> {
+  const out = new Map<string, FontInspection>();
   const names = [...new Set(fontNames.filter(Boolean))];
   if (!names.length) return out;
   try {
@@ -41,12 +57,20 @@ export async function captureEmbeddedFonts(
       try {
         if (!page.commonObjs.has(name)) continue;
         const f = page.commonObjs.get(name) as
-          | { data?: Uint8Array; mimetype?: string; missingFile?: boolean }
+          | { name?: string; data?: Uint8Array; mimetype?: string; missingFile?: boolean }
           | null;
-        if (!f || f.missingFile || !f.data || !f.data.length) continue;
-        out.set(name, { data: f.data, mimetype: f.mimetype || 'font/opentype' });
+        if (!f) continue;
+        const embedded = !f.missingFile && !!f.data && f.data.length > 0;
+        const rawName = f.name || name;
+        out.set(name, {
+          rawName,
+          displayName: prettyFontName(rawName),
+          embedded,
+          data: embedded ? f.data : undefined,
+          mimetype: embedded ? f.mimetype || 'font/opentype' : undefined,
+        });
       } catch {
-        /* this font stays uncaptured → caller falls back to a standard font */
+        /* this font stays undescribed → caller falls back to a standard font */
       }
     }
   } catch {
@@ -123,6 +147,10 @@ export async function extractTextRuns(page: PDFPageProxy, rotation: number): Pro
       bold,
       italic,
       fontName: item.fontName,
+      // Readable typeface name from the font pdf.js reports for this run — this is
+      // the document's real font name (e.g. "TimesNewRomanPS BoldMT"), shown in the
+      // scan editor's font panel so the user always sees the correct face.
+      fontLabel: prettyFontName(styleFamily ?? item.fontName),
     });
   }
 

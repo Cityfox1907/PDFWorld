@@ -1,7 +1,7 @@
 import type { BaseFamily } from './types';
 
 /**
- * Curated catalogue of the ~40 most-used document fonts.
+ * Curated catalogue of the ~90 most-used document fonts.
  *
  * Each web entry is backed by an @fontsource package (served from the jsDelivr
  * CDN), which gives us two things from one stable, versionless URL scheme:
@@ -73,7 +73,7 @@ const STANDARD: FontDef[] = [
   { key: 'mono', label: 'Mono (Courier)', base: 'mono', group: 'standard' },
 ];
 
-/** 37 popular web fonts. `key` === @fontsource package id. */
+/** 87 popular web fonts. `key` === @fontsource package id. */
 const WEB: Omit<FontDef, 'group'>[] = [
   // ── sans ──
   { key: 'inter', label: 'Inter', base: 'sans', web: W([400, 500, 700]) },
@@ -117,6 +117,60 @@ const WEB: Omit<FontDef, 'group'>[] = [
   { key: 'source-code-pro', label: 'Source Code Pro', base: 'mono', web: W([400, 500, 700]) },
   { key: 'jetbrains-mono', label: 'JetBrains Mono', base: 'mono', web: W([400, 500, 700]) },
   { key: 'inconsolata', label: 'Inconsolata', base: 'mono', web: W([400, 500, 700], false) },
+  // ── +50 most-used fonts (weights & italics verified against the source) ──
+  // sans
+  { key: 'manrope', label: 'Manrope', base: 'sans', web: W([400, 700], false) },
+  { key: 'figtree', label: 'Figtree', base: 'sans', web: W([400, 700]) },
+  { key: 'plus-jakarta-sans', label: 'Plus Jakarta Sans', base: 'sans', web: W([400, 700]) },
+  { key: 'sora', label: 'Sora', base: 'sans', web: W([400, 700], false) },
+  { key: 'epilogue', label: 'Epilogue', base: 'sans', web: W([400, 700]) },
+  { key: 'space-grotesk', label: 'Space Grotesk', base: 'sans', web: W([400, 700], false) },
+  { key: 'archivo', label: 'Archivo', base: 'sans', web: W([400, 700]) },
+  { key: 'archivo-narrow', label: 'Archivo Narrow', base: 'sans', web: W([400, 700]) },
+  { key: 'assistant', label: 'Assistant', base: 'sans', web: W([400, 700], false) },
+  { key: 'heebo', label: 'Heebo', base: 'sans', web: W([400, 700], false) },
+  { key: 'hind', label: 'Hind', base: 'sans', web: W([400, 700], false) },
+  { key: 'cairo', label: 'Cairo', base: 'sans', web: W([400, 700], false) },
+  { key: 'exo-2', label: 'Exo 2', base: 'sans', web: W([400, 700]) },
+  { key: 'kanit', label: 'Kanit', base: 'sans', web: W([400, 700]) },
+  { key: 'saira', label: 'Saira', base: 'sans', web: W([400, 700]) },
+  { key: 'signika', label: 'Signika', base: 'sans', web: W([400, 700], false) },
+  { key: 'asap', label: 'Asap', base: 'sans', web: W([400, 700]) },
+  { key: 'catamaran', label: 'Catamaran', base: 'sans', web: W([400, 700], false) },
+  { key: 'dosis', label: 'Dosis', base: 'sans', web: W([400, 700], false) },
+  { key: 'jost', label: 'Jost', base: 'sans', web: W([400, 700]) },
+  { key: 'lexend', label: 'Lexend', base: 'sans', web: W([400, 700], false) },
+  { key: 'maven-pro', label: 'Maven Pro', base: 'sans', web: W([400, 700], false) },
+  { key: 'overpass', label: 'Overpass', base: 'sans', web: W([400, 700]) },
+  { key: 'pt-sans-narrow', label: 'PT Sans Narrow', base: 'sans', web: W([400, 700], false) },
+  { key: 'red-hat-display', label: 'Red Hat Display', base: 'sans', web: W([400, 700]) },
+  { key: 'urbanist', label: 'Urbanist', base: 'sans', web: W([400, 700]) },
+  { key: 'be-vietnam-pro', label: 'Be Vietnam Pro', base: 'sans', web: W([400, 700]) },
+  { key: 'libre-franklin', label: 'Libre Franklin', base: 'sans', web: W([400, 700]) },
+  { key: 'mukta', label: 'Mukta', base: 'sans', web: W([400, 700], false) },
+  { key: 'varela-round', label: 'Varela Round', base: 'sans', web: W([400], false) },
+  { key: 'fjalla-one', label: 'Fjalla One', base: 'sans', web: W([400], false) },
+  { key: 'khand', label: 'Khand', base: 'sans', web: W([400, 700], false) },
+  { key: 'm-plus-rounded-1c', label: 'M PLUS Rounded 1c', base: 'sans', web: W([400, 700], false) },
+  { key: 'ibm-plex-sans', label: 'IBM Plex Sans', base: 'sans', web: W([400, 700]) },
+  { key: 'roboto-condensed', label: 'Roboto Condensed', base: 'sans', web: W([400, 700]) },
+  // serif
+  { key: 'bitter', label: 'Bitter', base: 'serif', web: W([400, 700]) },
+  { key: 'domine', label: 'Domine', base: 'serif', web: W([400, 700], false) },
+  { key: 'arvo', label: 'Arvo', base: 'serif', web: W([400, 700]) },
+  { key: 'cormorant', label: 'Cormorant', base: 'serif', web: W([400, 700]) },
+  { key: 'eb-garamond', label: 'EB Garamond', base: 'serif', web: W([400, 700]) },
+  { key: 'noto-serif', label: 'Noto Serif', base: 'serif', web: W([400, 700]) },
+  { key: 'source-serif-4', label: 'Source Serif 4', base: 'serif', web: W([400, 700]) },
+  { key: 'spectral', label: 'Spectral', base: 'serif', web: W([400, 700]) },
+  { key: 'zilla-slab', label: 'Zilla Slab', base: 'serif', web: W([400, 700]) },
+  { key: 'alegreya', label: 'Alegreya', base: 'serif', web: W([400, 700]) },
+  { key: 'ibm-plex-serif', label: 'IBM Plex Serif', base: 'serif', web: W([400, 700]) },
+  // mono
+  { key: 'space-mono', label: 'Space Mono', base: 'mono', web: W([400, 700]) },
+  { key: 'ibm-plex-mono', label: 'IBM Plex Mono', base: 'mono', web: W([400, 700]) },
+  { key: 'fira-code', label: 'Fira Code', base: 'mono', web: W([400, 700], false) },
+  { key: 'ubuntu-mono', label: 'Ubuntu Mono', base: 'mono', web: W([400, 700]) },
 ];
 
 export const FONT_CATALOG: FontDef[] = [

@@ -152,6 +152,10 @@ export interface TextRun {
   fontName: string;
   /** id of the captured original font (see embeddedFonts.ts), when embedded */
   embeddedFontId?: string;
+  /** human-friendly typeface name read from the PDF (subset prefix stripped) */
+  fontLabel?: string;
+  /** true when the source PDF embeds this font (so it can be reused 1:1) */
+  embedded?: boolean;
 }
 
 /** A fillable AcroForm field. */

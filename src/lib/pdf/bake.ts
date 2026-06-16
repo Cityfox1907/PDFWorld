@@ -9,12 +9,13 @@ import {
   LineCapStyle,
 } from 'pdf-lib';
 import type { AnyElement, TextElement, RectElement, EllipseElement, HighlightElement, ImageElement, InkElement } from './types';
-import { standardFontFor } from './fonts';
+import { standardFontFor, BASELINE_RATIO } from './fonts';
 import { baseFamilyOf, fontFileUrl } from './fontCatalog';
+import { getEmbeddedFont } from './embeddedFonts';
 import { placeBox, axisAngleDeg, type ToPdfPoint } from './coords';
 
 /** Where the baseline sits below a line's top, as a fraction of the font size. */
-const ASCENT_RATIO = 0.8;
+const ASCENT_RATIO = BASELINE_RATIO;
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   let h = (hex || '#000000').replace('#', '').trim();
@@ -50,10 +51,18 @@ function dataUrlToBytes(src: string): { bytes: Uint8Array; mime: string } {
 export class Baker {
   private fontCache = new Map<string, PDFFont>();
   private webFontCache = new Map<string, PDFFont | null>();
+  private embeddedCache = new Map<string, PDFFont | null>();
   private imageCache = new Map<string, PDFImage>();
   private fontkitReady = false;
 
   constructor(private doc: PDFDocument) {}
+
+  private async ensureFontkit(): Promise<void> {
+    if (this.fontkitReady) return;
+    const fontkit = (await import('@pdf-lib/fontkit')).default;
+    this.doc.registerFontkit(fontkit);
+    this.fontkitReady = true;
+  }
 
   private async standardFont(el: TextElement): Promise<PDFFont> {
     const key = standardFontFor(baseFamilyOf(el.family), el.bold, el.italic);
@@ -61,6 +70,34 @@ export class Baker {
     if (cached) return cached;
     const font = await this.doc.embedFont(key as StandardFonts);
     this.fontCache.set(key, font);
+    return font;
+  }
+
+  /**
+   * Embed the *original* font captured from the source PDF (see embeddedFonts.ts)
+   * so replaced text matches glyph for glyph. Returns null when no original font
+   * was captured for this element or it can't be embedded — the caller then uses
+   * the web/standard font, so the export never breaks.
+   */
+  private async embeddedFont(el: TextElement): Promise<PDFFont | null> {
+    const id = el.embeddedFontId;
+    if (!id) return null;
+    if (this.embeddedCache.has(id)) return this.embeddedCache.get(id) ?? null;
+
+    const captured = getEmbeddedFont(id);
+    let font: PDFFont | null = null;
+    if (captured) {
+      try {
+        await this.ensureFontkit();
+        // The captured program is an already-subset font from the source PDF;
+        // embed it whole (subset:false) so its glyphs and cmap stay intact.
+        font = await this.doc.embedFont(captured.data, { subset: false });
+      } catch (err) {
+        console.warn('original font embed failed, using fallback:', id, err);
+        font = null;
+      }
+    }
+    this.embeddedCache.set(id, font);
     return font;
   }
 
@@ -80,11 +117,7 @@ export class Baker {
       const res = await fetch(url, { mode: 'cors' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const bytes = new Uint8Array(await res.arrayBuffer());
-      if (!this.fontkitReady) {
-        const fontkit = (await import('@pdf-lib/fontkit')).default;
-        this.doc.registerFontkit(fontkit);
-        this.fontkitReady = true;
-      }
+      await this.ensureFontkit();
       font = await this.doc.embedFont(bytes, { subset: true });
     } catch (err) {
       console.warn('web font embed failed, using standard fallback:', el.family, err);
@@ -229,10 +262,14 @@ export class Baker {
       });
     }
 
-    // Prefer the real embedded web font; keep a standard font ready as a per-line
-    // fallback for glyphs an exotic subset cannot encode.
-    const webFont = await this.webFont(el);
+    // Fidelity order: the original captured font (true 1:1 for scanned text) →
+    // the chosen web font → the metric-compatible standard font. A standard font
+    // is always kept ready as a per-line fallback for glyphs a custom subset
+    // cannot encode, so the export can never break.
+    const origFont = await this.embeddedFont(el);
+    const webFont = origFont ? null : await this.webFont(el);
     const stdFont = await this.standardFont(el);
+    const unicodeFont = origFont ?? webFont; // carries its own glyphs (full Unicode)
     const color = rgbColor(el.color);
     const lines = el.text.length ? el.text.split('\n') : [''];
 
@@ -242,7 +279,7 @@ export class Baker {
 
       const lineTop = el.y + i * el.size * el.lineHeight;
       const baselineY = lineTop + el.size * ASCENT_RATIO;
-      const x0 = lineX(el, line, webFont ?? stdFont);
+      const x0 = lineX(el, line, unicodeFont ?? stdFont);
       const anchor = toPdfPoint(x0, baselineY);
       const rotateDeg = axisAngleDeg(toPdfPoint, x0, baselineY);
 
@@ -258,9 +295,9 @@ export class Baker {
         });
 
       try {
-        // Embedded web fonts carry their own glyphs (full Unicode); standard fonts
-        // are WinAnsi, so sanitise unsupported characters to keep them from throwing.
-        if (webFont) draw(webFont, line);
+        // Custom fonts carry their own glyphs; standard fonts are WinAnsi, so
+        // sanitise unsupported characters to keep them from throwing.
+        if (unicodeFont) draw(unicodeFont, line);
         else draw(stdFont, sanitizeWinAnsi(line));
       } catch {
         try {

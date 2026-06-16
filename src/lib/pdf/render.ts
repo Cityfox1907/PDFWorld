@@ -3,7 +3,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 // Vite resolves this to a hashed URL and serves the worker as a module.
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { TextRun } from './types';
-import { classifyFont } from './fonts';
+import { classifyFont, BASELINE_RATIO } from './fonts';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -12,8 +12,47 @@ export type { PDFDocumentProxy, PDFPageProxy };
 /** Parse PDF bytes with pdf.js for rendering and text extraction. */
 export async function loadPdfjs(data: Uint8Array): Promise<PDFDocumentProxy> {
   // pdf.js transfers/detaches the buffer, so hand it a private copy.
-  const task = pdfjs.getDocument({ data: data.slice() });
+  // `fontExtraProperties` keeps each embedded font's program (`.data`) available
+  // after binding, so the scan editor can reuse the *original* typeface 1:1.
+  const task = pdfjs.getDocument({ data: data.slice(), fontExtraProperties: true });
   return task.promise;
+}
+
+/**
+ * Capture the raw program of embedded fonts used on a page, keyed by the pdf.js
+ * font name that `getTextContent` reports per run. Returns only fonts that are
+ * actually embedded (standard/non-embedded fonts report `missingFile`). The
+ * operator list is run once to guarantee the fonts are resolved into `commonObjs`.
+ * Never throws — a failure just yields fewer (or no) captured fonts.
+ */
+export async function captureEmbeddedFonts(
+  page: PDFPageProxy,
+  fontNames: string[],
+): Promise<Map<string, { data: Uint8Array; mimetype: string }>> {
+  const out = new Map<string, { data: Uint8Array; mimetype: string }>();
+  const names = [...new Set(fontNames.filter(Boolean))];
+  if (!names.length) return out;
+  try {
+    // Ensure every font referenced on the page is resolved on the main thread.
+    if (!names.every((n) => page.commonObjs.has(n))) {
+      await page.getOperatorList();
+    }
+    for (const name of names) {
+      try {
+        if (!page.commonObjs.has(name)) continue;
+        const f = page.commonObjs.get(name) as
+          | { data?: Uint8Array; mimetype?: string; missingFile?: boolean }
+          | null;
+        if (!f || f.missingFile || !f.data || !f.data.length) continue;
+        out.set(name, { data: f.data, mimetype: f.mimetype || 'font/opentype' });
+      } catch {
+        /* this font stays uncaptured → caller falls back to a standard font */
+      }
+    }
+  } catch {
+    /* operator list failed → return whatever we have (possibly empty) */
+  }
+  return out;
 }
 
 /** Total display rotation = the page's own /Rotate plus any user-added rotation. */
@@ -74,7 +113,9 @@ export async function extractTextRuns(page: PDFPageProxy, rotation: number): Pro
     runs.push({
       str,
       x,
-      y: baselineY - fontSize, // top of the glyph box
+      // Top of the glyph box using the shared ascent ratio, so the bake layer
+      // re-draws this line on EXACTLY its original baseline (no vertical shift).
+      y: baselineY - fontSize * BASELINE_RATIO,
       width,
       height,
       fontSize,

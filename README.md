@@ -15,14 +15,19 @@ die bestehenden Seiten eingezeichnet.
 - Seiten **einfügen** (leer), **duplizieren**, **löschen**, **drehen**
 - **Übersicht zoomen** – Thumbnails stufenlos vergrössern, um direkt in die
   Seitentexte hineinzuzoomen
+- **Seiten anordnen (Vollbild)** – ein Umschalter öffnet alle Seiten in einem
+  grossen Raster, ideal um auch 30–40 Seiten bequem zu sortieren
 
 ### 2. Bearbeitung
 - **Text scannen & bearbeiten** – ein Scan erkennt jede Textzeile und bündelt sie
-  zu klickbaren Blöcken. Beim Antippen werden Schrift, Grösse, Stil, Farbe und der
-  Hintergrund automatisch übernommen, sodass die Änderung unsichtbar einfügt
+  zu klickbaren Blöcken. Beim Antippen wird die **Originalschrift** des Dokuments
+  wiederverwendet (sofern eingebettet) – am Bildschirm wie beim Export – sodass die
+  Änderung 1:1 identisch aussieht. Grösse, Stil, Farbe und Hintergrund werden
+  ebenfalls übernommen; nach dem Bearbeiten lässt sich dieselbe Zeile erneut antippen
 - **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
   Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied
-- **Neuen Text** in Sans-/Serif-/Mono-Schrift hinzufügen (fett, kursiv, Ausrichtung, Farbe)
+- **Neuen Text** hinzufügen – Standardschrift **Arial**, Auswahl aus einem Font-Picker,
+  der jeden Namen in seiner eigenen Schrift zeigt (System-, Standard- & Web-Schriften)
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
 - **Bilder** platzieren
@@ -30,6 +35,9 @@ die bestehenden Seiten eingezeichnet.
 
 ### 3. Oberfläche
 - **Helles & dunkles Design** (umschaltbar, merkt sich die Wahl)
+- **Zoom bis 1000 %** – per Lupen-Buttons oder ⌘/Strg + Mausrad (Trackpad-Pinch)
+- **Speichern-Dialog** – Dateiname ändern und Zielordner wählen, bevor gespeichert wird
+  (nativer Speicherort-Dialog, wo der Browser ihn unterstützt)
 - Tastaturkürzel für jedes Werkzeug, Undo/Redo, Speichern
 
 ## Warum „ohne Qualitätsverlust"?
@@ -90,10 +98,12 @@ wird kein Backend benötigt.
 
 ## Bekannte Grenzen (ehrliche Einordnung)
 
-- **Schrift bei Textbearbeitung:** Ersetzter/neuer Text nutzt die metrisch sehr ähnlichen
-  Standardfonts (Helvetica/Times/Courier). Für Arial-/Times-/Courier-Dokumente praktisch
-  identisch; ein exotischer, eingebetteter Marken-Font wird durch die nächstliegende
-  Familie angenähert. Zeichen ausserhalb von WinAnsi werden ersetzt.
+- **Schrift bei Textbearbeitung:** Beim Scannen wird die **im PDF eingebettete
+  Originalschrift** extrahiert und für die Bearbeitung wiederverwendet (Bildschirm +
+  Export) – das Ergebnis ist dann pixelgenau identisch. Ist die Schrift nicht eingebettet
+  (oder nicht einbettbar), greift automatisch der metrisch sehr ähnliche Standardfont
+  (Helvetica/Times/Courier) – nie ein Bruch. Tippt man Zeichen, die der Original-Subset
+  nicht enthält, weicht der Export für diese Zeichen auf den Standardfont aus.
 - **Schwärzen** deckt Inhalte visuell ab (schwarzer Balken). Der darunterliegende Text
   bleibt technisch im PDF – es ist **keine** sicherheitskritische Redaktion.
 - **Markieren** nutzt halbtransparente Flächen (kein echter Multiply-Blendmodus).

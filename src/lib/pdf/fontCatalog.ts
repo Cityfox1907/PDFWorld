@@ -21,7 +21,11 @@ export interface FontDef {
   label: string;
   /** metric family used for the standard-font fallback on screen and on export */
   base: BaseFamily;
-  /** present for real web fonts; absent for the three built-in standard families */
+  /** which section of the picker the font belongs to */
+  group: 'system' | 'standard' | 'web';
+  /** explicit CSS font-family stack (system fonts that render with the real OS face) */
+  css?: string;
+  /** present for real web fonts; absent for system + standard families */
   web?: {
     /** weights actually published by the @fontsource package */
     weights: number[];
@@ -40,15 +44,37 @@ function sysStack(base: BaseFamily): string {
 
 const W = (weights: number[], italic = true) => ({ weights, italic });
 
+/**
+ * Common operating-system fonts. They render on screen with the user's *real*
+ * installed face (so the name previews exactly as it looks) and export via the
+ * metric-compatible PDF standard font. Arial is the editor default. These also
+ * give the scan editor familiar, document-typical names to fall back to.
+ */
+const SYSTEM: FontDef[] = [
+  { key: 'arial', label: 'Arial', base: 'sans', group: 'system', css: 'Arial, "Liberation Sans", "Helvetica Neue", Helvetica, sans-serif' },
+  { key: 'helvetica', label: 'Helvetica', base: 'sans', group: 'system', css: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif' },
+  { key: 'verdana', label: 'Verdana', base: 'sans', group: 'system', css: 'Verdana, Geneva, "DejaVu Sans", sans-serif' },
+  { key: 'tahoma', label: 'Tahoma', base: 'sans', group: 'system', css: 'Tahoma, Geneva, "DejaVu Sans", sans-serif' },
+  { key: 'trebuchet', label: 'Trebuchet MS', base: 'sans', group: 'system', css: '"Trebuchet MS", "Lucida Grande", sans-serif' },
+  { key: 'calibri', label: 'Calibri', base: 'sans', group: 'system', css: 'Calibri, Carlito, "Segoe UI", sans-serif' },
+  { key: 'segoe-ui', label: 'Segoe UI', base: 'sans', group: 'system', css: '"Segoe UI", Calibri, "Helvetica Neue", sans-serif' },
+  { key: 'times-new-roman', label: 'Times New Roman', base: 'serif', group: 'system', css: '"Times New Roman", "Liberation Serif", Times, serif' },
+  { key: 'georgia', label: 'Georgia', base: 'serif', group: 'system', css: 'Georgia, "Times New Roman", serif' },
+  { key: 'cambria', label: 'Cambria', base: 'serif', group: 'system', css: 'Cambria, "Caladea", Georgia, serif' },
+  { key: 'garamond', label: 'Garamond', base: 'serif', group: 'system', css: 'Garamond, "EB Garamond", "Times New Roman", serif' },
+  { key: 'courier-new', label: 'Courier New', base: 'mono', group: 'system', css: '"Courier New", "Liberation Mono", Courier, monospace' },
+  { key: 'consolas', label: 'Consolas', base: 'mono', group: 'system', css: 'Consolas, "DejaVu Sans Mono", "Courier New", monospace' },
+];
+
 /** The three built-in standard families render with zero network cost. */
 const STANDARD: FontDef[] = [
-  { key: 'sans', label: 'Sans (Helvetica)', base: 'sans' },
-  { key: 'serif', label: 'Serif (Times)', base: 'serif' },
-  { key: 'mono', label: 'Mono (Courier)', base: 'mono' },
+  { key: 'sans', label: 'Sans (Helvetica)', base: 'sans', group: 'standard' },
+  { key: 'serif', label: 'Serif (Times)', base: 'serif', group: 'standard' },
+  { key: 'mono', label: 'Mono (Courier)', base: 'mono', group: 'standard' },
 ];
 
 /** 37 popular web fonts. `key` === @fontsource package id. */
-const WEB: FontDef[] = [
+const WEB: Omit<FontDef, 'group'>[] = [
   // ── sans ──
   { key: 'inter', label: 'Inter', base: 'sans', web: W([400, 500, 700]) },
   { key: 'roboto', label: 'Roboto', base: 'sans', web: W([400, 500, 700]) },
@@ -93,13 +119,20 @@ const WEB: FontDef[] = [
   { key: 'inconsolata', label: 'Inconsolata', base: 'mono', web: W([400, 500, 700], false) },
 ];
 
-export const FONT_CATALOG: FontDef[] = [...STANDARD, ...WEB];
+export const FONT_CATALOG: FontDef[] = [
+  ...SYSTEM,
+  ...STANDARD,
+  ...WEB.map((f) => ({ ...f, group: 'web' as const })),
+];
+
+/** The editor's default font for new text (matches the user's expectation of Arial). */
+export const DEFAULT_FONT_KEY = 'arial';
 
 const BY_KEY = new Map(FONT_CATALOG.map((f) => [f.key, f]));
 
-/** Resolve a font key to its definition, defaulting to Sans for unknown keys. */
+/** Resolve a font key to its definition, defaulting to Arial for unknown keys. */
 export function fontDef(key: string): FontDef {
-  return BY_KEY.get(key) ?? FONT_CATALOG[0];
+  return BY_KEY.get(key) ?? BY_KEY.get(DEFAULT_FONT_KEY) ?? FONT_CATALOG[0];
 }
 
 export function baseFamilyOf(key: string): BaseFamily {
@@ -109,6 +142,7 @@ export function baseFamilyOf(key: string): BaseFamily {
 /** CSS font-family stack for previewing a font on screen (real font + system fallback). */
 export function cssStackFor(key: string): string {
   const f = fontDef(key);
+  if (f.css) return f.css;
   const sys = sysStack(f.base);
   return f.web ? `"${f.label}", ${sys}` : sys;
 }

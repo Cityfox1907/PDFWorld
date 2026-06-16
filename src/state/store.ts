@@ -9,7 +9,7 @@ import {
   type FormField,
   type FontFamilyKey,
 } from '../lib/pdf';
-import { readFileBytes, downloadBytes, baseName } from '../lib/utils/file';
+import { readFileBytes } from '../lib/utils/file';
 import { uid } from '../lib/utils/id';
 
 export type ToolId =
@@ -125,14 +125,15 @@ interface StoreState {
   redo: () => void;
 
   // ── export ──
-  exportPdf: () => Promise<void>;
+  /** Build the final edited PDF bytes (the SaveDialog then writes/downloads them). */
+  buildExportBytes: () => Promise<Uint8Array | null>;
 
   showToast: (message: string, kind?: 'info' | 'success' | 'error') => void;
 }
 
 const DEFAULT_TOOL: ToolDefaults = {
   textColor: '#111111',
-  textFamily: 'sans',
+  textFamily: 'arial',
   textSize: 16,
   highlightColor: '#ffd84d',
   drawColor: '#1a1a1a',
@@ -294,7 +295,9 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ activeTool: tool, selectedElementId: tool === 'select' ? get().selectedElementId : null });
   },
   setZoom(zoom) {
-    set({ zoom: Math.max(0.25, Math.min(4, Number(zoom.toFixed(2)))) });
+    // Up to 1000 % magnification (MIN 25 %). The page bitmap is resolution-capped
+    // in PageCanvas, so an extreme zoom stays visible instead of blanking out.
+    set({ zoom: Math.max(0.25, Math.min(10, Number(zoom.toFixed(2)))) });
   },
   setCurrentPage(id) {
     set({ currentPageId: id, selectedElementId: null });
@@ -453,9 +456,9 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
 
-  async exportPdf() {
-    const { engine, pages, formValues, flattenForm, fileName } = get();
-    if (!pages.length) return;
+  async buildExportBytes() {
+    const { engine, pages, formValues, flattenForm } = get();
+    if (!pages.length) return null;
     set({ exporting: true });
     try {
       const specs: ExportPageSpec[] = pages.map((p) => ({
@@ -465,12 +468,11 @@ export const useStore = create<StoreState>((set, get) => ({
         blankSize: p.blank ? { width: p.mediaWidth, height: p.mediaHeight } : undefined,
         elements: p.elements,
       }));
-      const bytes = await engine.export(specs, { formValues, flattenForm });
-      downloadBytes(bytes, `${baseName(fileName) || 'dokument'}-bearbeitet.pdf`);
-      get().showToast(`Gespeichert · ${(bytes.length / 1024 / 1024).toFixed(2)} MB`, 'success');
+      return await engine.export(specs, { formValues, flattenForm });
     } catch (err) {
       console.error(err);
       get().showToast('Export fehlgeschlagen.', 'error');
+      return null;
     } finally {
       set({ exporting: false });
     }

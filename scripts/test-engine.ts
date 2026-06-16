@@ -9,6 +9,8 @@
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { makeToPdfPoint, placeBox } from '../src/lib/pdf/coords.ts';
 import { exportInPlace, exportRebuild, isIdentityArrangement, BLANK_SOURCE, type ExportPageSpec } from '../src/lib/pdf/pages.ts';
+import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf } from '../src/lib/pdf/fontCatalog.ts';
+import { registerEmbeddedFont, getEmbeddedFont, embeddedFontFamily } from '../src/lib/pdf/embeddedFonts.ts';
 import type { AnyElement } from '../src/lib/pdf/types.ts';
 
 let passed = 0;
@@ -109,6 +111,22 @@ async function run(): Promise<void> {
 
     const box90 = placeBox(r90, 50, 50, 200, 30);
     ok('placeBox rot90 width/height preserved', approx(box90.width, 200) && approx(box90.height, 30) && box90.rotateDeg === 90);
+  }
+
+  // ── font catalogue + original-font capture ──
+  console.log('\nfonts (catalogue + original-font capture)');
+  {
+    ok('default font is Arial', DEFAULT_FONT_KEY === 'arial');
+    ok('Arial maps to the sans metric family', baseFamilyOf('arial') === 'sans');
+    ok('Arial preview stack names Arial', /arial/i.test(cssStackFor('arial')));
+    ok('Times New Roman is a serif system font', fontDef('times-new-roman').base === 'serif' && fontDef('times-new-roman').group === 'system');
+    ok('unknown font key falls back to Arial', fontDef('does-not-exist').key === 'arial');
+
+    const data = new Uint8Array([1, 2, 3, 4]);
+    registerEmbeddedFont({ id: 'src#0#f7', data, mimetype: 'font/opentype' });
+    ok('captured original font bytes are retrievable for export', getEmbeddedFont('src#0#f7')?.data === data);
+    ok('no @font-face family without a DOM (graceful)', embeddedFontFamily('src#0#f7') === undefined);
+    ok('uncaptured id returns nothing', getEmbeddedFont('missing') === undefined);
   }
 
   // ── in-place export preserves original text + adds overlay ──
@@ -224,6 +242,9 @@ async function run(): Promise<void> {
       { id: 's', type: 'signature', x: 200, y: 300, width: 120, height: 40, opacity: 1, z: 6, src: PNG_1x1, aspect: 3 },
       textEl({ id: 'm', text: 'MULTI\nLINE', align: 'center', x: 60, y: 300 }),
       textEl({ id: 'cov', text: 'REPLACED', x: 60, y: 360, coverColor: '#ffffff' }),
+      // A scanned edit referencing an original font that ISN'T available here:
+      // the bake layer must fall back to the standard font, never break export.
+      { ...textEl({ id: 'emb', text: 'ORIGINAL', x: 60, y: 420, coverColor: '#ffffff' }), embeddedFontId: 'missing#0#g_d0_f1' } as AnyElement,
     ];
     const out = await exportInPlace(fresh, [{ sourceKey: 'main', sourceIndex: 0, addedRotation: 0, elements: els }], {});
     const reread = await PDFDocument.load(out);
@@ -231,6 +252,7 @@ async function run(): Promise<void> {
     const text = await extractText(out);
     ok('original text + baked multiline text present', text[0].includes('ALPHA') && text[0].includes('MULTI'));
     ok('cover-replaced text baked', text[0].includes('REPLACED'));
+    ok('missing embedded font falls back to standard', text[0].includes('ORIGINAL'));
   }
 
   // ── forms: fill + flatten ──

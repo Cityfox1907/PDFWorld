@@ -11,13 +11,16 @@ export function TopBar() {
   const redo = useStore((s) => s.redo);
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
-  const exportPdf = useStore((s) => s.exportPdf);
+  const openSaveDialog = useUI((s) => s.openSaveDialog);
   const exporting = useStore((s) => s.exporting);
   const mergeFile = useStore((s) => s.mergeFile);
   const reset = useStore((s) => s.reset);
   const theme = useUI((s) => s.theme);
   const toggleTheme = useUI((s) => s.toggleTheme);
   const mergeRef = useRef<HTMLInputElement>(null);
+
+  // Multiplicative steps traverse the wide 25 %–1000 % range in a handful of clicks.
+  const zoomBy = (factor: number) => setZoom(zoom * factor);
 
   return (
     <div className="topbar">
@@ -40,13 +43,13 @@ export function TopBar() {
           </button>
         </div>
         <div className="seg">
-          <button className="seg-btn" onClick={() => setZoom(zoom - 0.15)} title="Verkleinern">
+          <button className="seg-btn" onClick={() => zoomBy(1 / 1.25)} title="Verkleinern" disabled={zoom <= 0.25}>
             <ZoomOut size={16} />
           </button>
-          <button className="seg-btn zoom-label" onClick={() => setZoom(1)} title="Zoom zurücksetzen">
+          <button className="seg-btn zoom-label" onClick={() => setZoom(1)} title="Zoom zurücksetzen (100 %)">
             {Math.round(zoom * 100)}%
           </button>
-          <button className="seg-btn" onClick={() => setZoom(zoom + 0.15)} title="Vergrössern">
+          <button className="seg-btn" onClick={() => zoomBy(1.25)} title="Vergrössern (bis 1000 %)" disabled={zoom >= 10}>
             <ZoomIn size={16} />
           </button>
         </div>
@@ -72,7 +75,7 @@ export function TopBar() {
         >
           <FolderOpen size={16} /> Öffnen
         </button>
-        <button className="btn primary" onClick={() => void exportPdf()} disabled={exporting}>
+        <button className="btn primary" onClick={openSaveDialog} disabled={exporting}>
           {exporting ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
           {exporting ? 'Speichert…' : 'Speichern'}
         </button>

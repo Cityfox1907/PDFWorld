@@ -112,7 +112,12 @@ export function sampleColorAt(
   }
 }
 
-/** Sample the darkest pixel within a text box — a good estimate of glyph color. */
+/**
+ * Estimate a line's glyph colour from the rendered canvas. Anti-aliasing means a
+ * single darkest pixel is noisy, so we collect the glyph pixels — the ones that
+ * stand out clearly from the (lighter) background — and average them. This is far
+ * steadier across black body text and coloured headings alike.
+ */
 export function sampleTextColor(
   canvas: HTMLCanvasElement,
   box: { x: number; y: number; width: number; height: number },
@@ -127,23 +132,34 @@ export function sampleTextColor(
   if (w <= 0 || h <= 0) return '#111111';
   try {
     const data = ctx.getImageData(x, y, w, h).data;
-    let br = 0;
-    let bg = 0;
-    let bb = 0;
-    let bestLum = 256;
+    const lum = (i: number) => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+
+    // Background ≈ the brightest region; the ink is whatever is clearly darker.
+    let maxLum = 0;
+    let minLum = 255;
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-      if (lum < bestLum) {
-        bestLum = lum;
-        br = r;
-        bg = g;
-        bb = b;
+      const l = lum(i);
+      if (l > maxLum) maxLum = l;
+      if (l < minLum) minLum = l;
+    }
+    if (maxLum - minLum < 8) return '#111111'; // no real glyphs in the box
+    const threshold = minLum + (maxLum - minLum) * 0.45;
+
+    let rs = 0;
+    let gs = 0;
+    let bs = 0;
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (lum(i) <= threshold) {
+        rs += data[i];
+        gs += data[i + 1];
+        bs += data[i + 2];
+        n++;
       }
     }
-    return `#${br.toString(16).padStart(2, '0')}${bg.toString(16).padStart(2, '0')}${bb.toString(16).padStart(2, '0')}`;
+    if (!n) return '#111111';
+    const hex = (v: number) => Math.round(v / n).toString(16).padStart(2, '0');
+    return `#${hex(rs)}${hex(gs)}${hex(bs)}`;
   } catch {
     return '#111111';
   }

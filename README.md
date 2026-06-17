@@ -30,9 +30,20 @@ die bestehenden Seiten eingezeichnet.
   mit **„Neues Feld darunter · 9 pt“** ein leeres Feld in derselben Schrift direkt
   unter der Zeile angelegt
 - **Pixelgenaue Ausrichtung** – ausgewählte Felder lassen sich mit den **Pfeiltasten**
-  verschieben (1 pt, mit Shift 10 pt); beim Bewegen rastet ein Textfeld auf der
-  **Grundlinie der Nachbarzeile** ein (sichtbare Hilfslinie, Alt hält frei), damit
-  nebeneinanderstehende Texte nie versetzt wirken
+  Pixel für Pixel verschieben (1 px, mit Shift 10 px – unabhängig vom Zoom). Fluchtet
+  die **Grundlinie der Buchstaben** exakt mit einer Nachbarzeile, erscheint kurz eine
+  **Hilfslinie** als reine Sichthilfe – sie rastet nichts ein und zieht nichts an wie
+  ein Magnet
+- **Drehen** – jedes Element (Textfeld, Form, Bild …) lässt sich per Regler frei
+  drehen; die Drehung wird verlustfrei exakt so in die Seite gezeichnet
+- **Ausschneiden** – einen rechteckigen Bereich aufziehen: er wird als frei
+  verschiebbares Stück herausgelöst (sofort angewählt), die Stelle dahinter mit ihrer
+  eigenen Hintergrundfarbe abgedeckt. Stücke lassen sich verschieben, **duplizieren**
+  (⌘/Strg + D) und **kopieren/einfügen** (⌘/Strg + C · V)
+- **Sperren** – ein Element gegen versehentliches Verschieben sichern; ein dezentes
+  Schloss-Symbol oben rechts erscheint kurz beim Anwählen zum Ent-/Sperren
+- **Direkt tippen** – ein neues Textfeld landet genau auf der angeklickten Linie und
+  ist sofort beschreibbar; **Enter** schliesst ab, **Shift + Enter** macht einen Umbruch
 - **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
   Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied. Die aufgenommene
   Farbe wandert in die **Farbauswahl** und lässt sich per Klick als Schriftfarbe
@@ -50,7 +61,7 @@ die bestehenden Seiten eingezeichnet.
 
 ### 3. Oberfläche
 - **Helles & dunkles Design** (umschaltbar, merkt sich die Wahl)
-- **Zoom bis 1000 %** – per Lupen-Buttons oder ⌘/Strg + Mausrad (Trackpad-Pinch)
+- **Zoom bis 2000 %** – per Lupen-Buttons oder ⌘/Strg + Mausrad (Trackpad-Pinch)
 - **Speichern-Dialog** – Dateiname ändern und Zielordner wählen, bevor gespeichert wird
   (nativer Speicherort-Dialog, wo der Browser ihn unterstützt)
 - Tastaturkürzel für jedes Werkzeug, Undo/Redo, Speichern

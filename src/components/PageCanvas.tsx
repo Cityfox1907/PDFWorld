@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useStore, visibleSize, type EditorPage } from '../state/store';
+import { useStore, visibleSize, MAX_ZOOM, MIN_ZOOM, type EditorPage } from '../state/store';
 import {
   renderPageRegion,
   extractTextRuns,
@@ -37,9 +37,11 @@ const MAX_BITMAP_AREA = 16_000_000;
 // Extra CSS px rendered just outside the viewport so small scrolls reveal already-
 // sharp content instead of a blank edge while the next window render lands.
 const OVERSCAN = 128;
-// Highest magnification (1000 %). Mirrors the clamp in the store's setZoom.
-const MAX_ZOOM = 10;
-const MIN_ZOOM = 0.25;
+// Magnification limits (25 %–2000 %) come from the store so the clamp lives once.
+// How close (in screen pixels) a text baseline must be to a neighbour's before the
+// alignment guide lights up. Small, because the guide is a pure visual confirmation
+// of exact alignment — it never snaps or pulls the box.
+const ALIGN_TOL = 1.5;
 
 export function PageCanvas() {
   const pages = useStore((s) => s.pages);
@@ -51,6 +53,7 @@ export function PageCanvas() {
   const activeTool = useStore((s) => s.activeTool);
   const tool = useStore((s) => s.tool);
   const addElement = useStore((s) => s.addElement);
+  const addElements = useStore((s) => s.addElements);
   const updateElement = useStore((s) => s.updateElement);
   const deleteElement = useStore((s) => s.deleteElement);
   const commit = useStore((s) => s.commit);
@@ -395,9 +398,11 @@ export function PageCanvas() {
     [page, scanBaselines],
   );
 
-  // Arrow keys nudge the selected element for precise alignment (Shift = 10 pt).
-  // A vertical nudge snaps a text box onto a neighbouring baseline; hold Alt to
-  // bypass the snap. Ignored while typing in a text box or any input.
+  // Arrow keys nudge the selected element pixel-for-pixel for precise placement:
+  // each press moves exactly one screen pixel (Shift = 10), independent of the zoom,
+  // so a deeply zoomed-in field can be inched into place. A neighbour-baseline guide
+  // only *appears* when the text's own baseline lands on another line — it never
+  // pulls the box. Ignored while typing, and locked elements stay put.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!page || editingId) return;
@@ -407,9 +412,10 @@ export function PageCanvas() {
       const selId = useStore.getState().selectedElementId;
       if (!selId) return;
       const target = page.elements.find((el) => el.id === selId);
-      if (!target) return;
+      if (!target || target.locked) return;
       e.preventDefault();
-      const step = e.shiftKey ? 10 : 1;
+      // One CSS pixel in view-points; coarse step with Shift.
+      const step = (e.shiftKey ? 10 : 1) / scale;
       let nx = target.x;
       let ny = target.y;
       if (e.key === 'ArrowLeft') nx -= step;
@@ -417,13 +423,12 @@ export function PageCanvas() {
       else if (e.key === 'ArrowUp') ny -= step;
       else ny += step;
 
+      // Visual-only alignment hint: show the guide when the (unrotated) text baseline
+      // coincides with a neighbour's, then it vanishes again as you move on.
       let guide: number | null = null;
-      if (target.type === 'text' && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        const snap = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), 4);
-        if (snap != null) {
-          ny = snap - target.size * BASELINE_RATIO;
-          guide = snap;
-        }
+      if (target.type === 'text' && !target.rotation) {
+        const near = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
+        if (near != null) guide = near;
       }
       // Snapshot once at the start of a burst (or when the target changes) so a
       // single undo reverts the whole run of nudges — matching addElement's model.
@@ -448,7 +453,7 @@ export function PageCanvas() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [page, editingId, updateElement, commit, getAlignTargets]);
+  }, [page, editingId, updateElement, commit, getAlignTargets, scale]);
 
   const evToView = (e: { clientX: number; clientY: number }) => {
     const rect = overlayRef.current!.getBoundingClientRect();
@@ -496,8 +501,11 @@ export function PageCanvas() {
       const el: TextElement = {
         id: uid('el'),
         type: 'text',
+        // Insert the line exactly where the I-beam sits: the click point becomes the
+        // vertical middle of the first line (not the box top), so text lands on the
+        // line you pointed at instead of dropping below it.
         x: start.x,
-        y: start.y,
+        y: start.y - tool.textSize * 0.5,
         width: 240,
         height: Math.max(tool.textSize * 1.4, 22),
         opacity: 1,
@@ -517,6 +525,10 @@ export function PageCanvas() {
       // jump straight into editing — the caret is ready, just start typing.
       setTool('select');
       setEditingId(el.id);
+      return;
+    }
+    if (activeTool === 'cut') {
+      startCut(start, e);
       return;
     }
     if (activeTool === 'draw') {
@@ -631,6 +643,93 @@ export function PageCanvas() {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  // ── cut-out tool: marquee a region, snapshot its pixels into a movable image and
+  // cover the original spot with its own background so the piece reads as "cut out". ──
+  const startCut = (start: { x: number; y: number }, e: React.PointerEvent) => {
+    if (!page) return;
+    const move = (ev: PointerEvent) => {
+      const p = evToView(ev);
+      const x = Math.min(start.x, p.x);
+      const y = Math.min(start.y, p.y);
+      setDraft({
+        id: 'draft-cut',
+        type: 'rect',
+        x,
+        y,
+        width: Math.abs(p.x - start.x),
+        height: Math.abs(p.y - start.y),
+        opacity: 1,
+        z: nextZ(page),
+        fill: null,
+        stroke: 'var(--accent)',
+        strokeWidth: 1,
+        radius: 0,
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setDraft((d) => {
+        if (d && d.width > 4 && d.height > 4) cutRegion(d.x, d.y, d.width, d.height);
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  const cutRegion = (x: number, y: number, w: number, h: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !page) return;
+    // Map the view-space rectangle to bitmap pixels via the last render's origin +
+    // density, then clamp to what's actually painted (the visible window).
+    const { px, ox, oy } = sampleMap();
+    const sx = Math.max(0, Math.round(x * px - ox));
+    const sy = Math.max(0, Math.round(y * px - oy));
+    const ex = Math.min(canvas.width, Math.round((x + w) * px - ox));
+    const ey = Math.min(canvas.height, Math.round((y + h) * px - oy));
+    const cw = ex - sx;
+    const ch = ey - sy;
+    if (cw <= 1 || ch <= 1) {
+      showToast('Bereich liegt ausserhalb des sichtbaren Fensters.', 'error');
+      return;
+    }
+    const off = document.createElement('canvas');
+    off.width = cw;
+    off.height = ch;
+    const octx = off.getContext('2d');
+    if (!octx) return;
+    octx.drawImage(canvas, sx, sy, cw, ch, 0, 0, cw, ch);
+    let src: string;
+    try {
+      src = off.toDataURL('image/png');
+    } catch {
+      showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
+      return;
+    }
+
+    // The exact view-space rect that was captured (after clamping).
+    const vx = (sx + ox) / px;
+    const vy = (sy + oy) / px;
+    const vw = cw / px;
+    const vh = ch / px;
+
+    const bg = sampleBackground(canvas, { x: vx, y: vy, width: vw, height: vh }, px, ox, oy);
+    const z = nextZ(page);
+    // Cover the hole with the region's own background, the snapshot floats on top.
+    const cover: AnyElement = {
+      id: uid('el'), type: 'rect', x: vx, y: vy, width: vw, height: vh,
+      opacity: 1, z, fill: bg, stroke: null, strokeWidth: 0, radius: 0,
+    };
+    const piece: AnyElement = {
+      id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh,
+      opacity: 1, z: z + 1, src, aspect: vw / vh,
+    };
+    addElements(page.id, [cover, piece], piece.id); // one undo step, piece selected
+    setTool('select');
   };
 
   const startDrawing = (start: { x: number; y: number }) => {
@@ -859,7 +958,7 @@ export function PageCanvas() {
 
           {draft && <DraftView el={draft} scale={scale} />}
 
-          {/* Alignment guide: a line at the baseline a text box is snapping to. */}
+          {/* Alignment guide: appears only while a text baseline sits exactly on a neighbour's. */}
           {alignGuideY != null && <div className="align-guide" style={{ top: alignGuideY * scale }} />}
 
           {activeTool === 'edit-text' && (

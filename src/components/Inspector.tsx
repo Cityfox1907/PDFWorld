@@ -1,7 +1,8 @@
 import { useStore } from '../state/store';
 import type { AnyElement, ElementPatch, TextElement } from '../lib/pdf';
 import { FontPicker } from './FontPicker';
-import { Bold, Italic, AlignLeft, AlignCenter, AlignRight, Copy, BringToFront, SendToBack, Trash2 } from 'lucide-react';
+import { ColorPicker } from './ColorPicker';
+import { Bold, Italic, AlignLeft, AlignCenter, AlignRight, Copy, BringToFront, SendToBack, Trash2, Type } from 'lucide-react';
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -28,6 +29,8 @@ export function Inspector() {
   const commit = useStore((s) => s.commit);
   const tool = useStore((s) => s.tool);
   const setToolDefaults = useStore((s) => s.setToolDefaults);
+  const addRecentColor = useStore((s) => s.addRecentColor);
+  const showToast = useStore((s) => s.showToast);
 
   const page = pages.find((p) => p.id === currentPageId);
   const el = page?.elements.find((e) => e.id === selectedId) ?? null;
@@ -72,7 +75,7 @@ export function Inspector() {
             <Group title="Markierung">
               <Row>
                 <label>Farbe</label>
-                <input className="swatch" type="color" value={el.color} onChange={(e) => set({ color: e.target.value })} />
+                <ColorPicker title="Markierungsfarbe" value={el.color} onChange={(c) => set({ color: c })} />
               </Row>
             </Group>
           )}
@@ -80,7 +83,7 @@ export function Inspector() {
             <Group title="Zeichnung">
               <Row>
                 <label>Farbe</label>
-                <input className="swatch" type="color" value={el.color} onChange={(e) => set({ color: e.target.value })} />
+                <ColorPicker title="Linienfarbe" value={el.color} onChange={(c) => set({ color: c })} />
                 <label>Stärke</label>
                 <input type="range" min={1} max={12} step={0.5} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) }, false)} onMouseUp={commit} />
               </Row>
@@ -117,11 +120,11 @@ export function Inspector() {
           </Row>
           <Row>
             <label>Grösse</label>
-            <input className="field" type="number" value={tool.textSize} onChange={(e) => setToolDefaults({ textSize: Number(e.target.value) })} />
+            <input className="field field-sm" type="number" min={4} max={400} value={tool.textSize} onChange={(e) => setToolDefaults({ textSize: Number(e.target.value) })} />
             <label>Farbe</label>
-            <input className="swatch" type="color" value={tool.textColor} onChange={(e) => setToolDefaults({ textColor: e.target.value })} />
+            <ColorPicker title="Schriftfarbe" value={tool.textColor} onChange={(c) => setToolDefaults({ textColor: c })} />
           </Row>
-          <p className="insp-hint">Auf die Seite klicken, um Text einzufügen.</p>
+          <p className="insp-hint">Standard: <strong>Grösse 9</strong>, Schwarz. Auf die Seite klicken, um Text einzufügen.</p>
         </Group>
       );
     }
@@ -130,7 +133,7 @@ export function Inspector() {
         <Group title="Markieren">
           <Row>
             <label>Farbe</label>
-            <input className="swatch" type="color" value={tool.highlightColor} onChange={(e) => setToolDefaults({ highlightColor: e.target.value })} />
+            <ColorPicker title="Markierungsfarbe" value={tool.highlightColor} onChange={(c) => setToolDefaults({ highlightColor: c })} />
           </Row>
           <p className="insp-hint">Über Text ziehen, um ihn zu markieren.</p>
         </Group>
@@ -141,7 +144,7 @@ export function Inspector() {
         <Group title="Zeichnen">
           <Row>
             <label>Farbe</label>
-            <input className="swatch" type="color" value={tool.drawColor} onChange={(e) => setToolDefaults({ drawColor: e.target.value })} />
+            <ColorPicker title="Linienfarbe" value={tool.drawColor} onChange={(c) => setToolDefaults({ drawColor: c })} />
             <label>Stärke</label>
             <input type="range" min={1} max={12} step={0.5} value={tool.drawWidth} onChange={(e) => setToolDefaults({ drawWidth: Number(e.target.value) })} />
           </Row>
@@ -153,9 +156,9 @@ export function Inspector() {
         <Group title={activeTool === 'rect' ? 'Rechteck' : 'Ellipse'}>
           <Row>
             <label>Füllung</label>
-            <input className="swatch" type="color" value={tool.shapeFill} onChange={(e) => setToolDefaults({ shapeFill: e.target.value })} />
+            <ColorPicker title="Füllfarbe" value={tool.shapeFill} onChange={(c) => setToolDefaults({ shapeFill: c })} />
             <label>Rand</label>
-            <input className="swatch" type="color" value={tool.shapeStroke} onChange={(e) => setToolDefaults({ shapeStroke: e.target.value })} />
+            <ColorPicker title="Randfarbe" value={tool.shapeStroke} onChange={(c) => setToolDefaults({ shapeStroke: c })} />
           </Row>
         </Group>
       );
@@ -187,9 +190,21 @@ export function Inspector() {
             <span className="swatch-preview" style={{ background: tool.brushColor }} />
             <span className="insp-hint" style={{ margin: 0 }}>{tool.brushColor}</span>
           </Row>
+          <button
+            className="btn ghost insp-wide"
+            onClick={() => {
+              setToolDefaults({ textColor: tool.brushColor });
+              addRecentColor(tool.brushColor);
+              showToast('Pinsel-Farbe für neuen Text übernommen', 'success');
+            }}
+            title="Die zuletzt aufgenommene Farbe als Schriftfarbe verwenden"
+          >
+            <Type size={15} /> Farbe für Text übernehmen
+          </button>
           <p className="insp-hint">
             Male über eine Stelle — der Pinsel nimmt automatisch die exakte Hintergrundfarbe
-            direkt darunter auf und überdeckt den Inhalt unsichtbar.
+            direkt darunter auf und überdeckt den Inhalt unsichtbar. Die aufgenommene Farbe
+            landet auch in der Farbauswahl unter „Zuletzt verwendet“.
           </p>
         </Group>
       );
@@ -201,7 +216,9 @@ export function Inspector() {
             Erkannte Textzeilen werden markiert. Klicke auf eine Zeile, um ihre echte
             Schrift zu sehen — Name, Grösse, Stil, Farbe und ob die Originalschrift
             eingebettet ist. Mit <strong>„Originalschrift übernehmen“</strong> wird ein
-            Textfeld in exakt dieser Schrift eingefügt.
+            Textfeld in exakt dieser Schrift eingefügt — oder lege mit
+            <strong> „Neues Feld darunter“</strong> direkt ein leeres Feld (9 pt) in
+            derselben Schrift an.
           </p>
           <p className="insp-hint">
             Tipp: Mit den Pfeiltasten verschiebst du ein Feld pixelgenau; beim Bewegen
@@ -228,30 +245,30 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
       </Row>
       {el.embeddedFontId && <p className="insp-hint" style={{ margin: '0 0 2px' }}>✓ Originalschrift des Dokuments (1:1)</p>}
       <Row>
-        <input className="field" type="number" value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />
-        <input className="swatch" type="color" value={el.color} onChange={(e) => set({ color: e.target.value })} />
-        <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold, embeddedFontId: undefined })}>
+        <input className="field field-sm" type="number" min={4} max={400} value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />
+        <ColorPicker title="Schriftfarbe" value={el.color} onChange={(c) => set({ color: c })} />
+        <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold, embeddedFontId: undefined })} title="Fett">
           <Bold size={15} />
         </button>
-        <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic, embeddedFontId: undefined })}>
+        <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic, embeddedFontId: undefined })} title="Kursiv">
           <Italic size={15} />
         </button>
       </Row>
       <Row>
-        <button className={`btn icon ${el.align === 'left' ? 'primary' : 'ghost'}`} onClick={() => set({ align: 'left' })}>
+        <button className={`btn icon ${el.align === 'left' ? 'primary' : 'ghost'}`} onClick={() => set({ align: 'left' })} title="Linksbündig">
           <AlignLeft size={15} />
         </button>
-        <button className={`btn icon ${el.align === 'center' ? 'primary' : 'ghost'}`} onClick={() => set({ align: 'center' })}>
+        <button className={`btn icon ${el.align === 'center' ? 'primary' : 'ghost'}`} onClick={() => set({ align: 'center' })} title="Zentriert">
           <AlignCenter size={15} />
         </button>
-        <button className={`btn icon ${el.align === 'right' ? 'primary' : 'ghost'}`} onClick={() => set({ align: 'right' })}>
+        <button className={`btn icon ${el.align === 'right' ? 'primary' : 'ghost'}`} onClick={() => set({ align: 'right' })} title="Rechtsbündig">
           <AlignRight size={15} />
         </button>
       </Row>
       {el.coverColor && (
         <Row>
           <label>Hintergrund</label>
-          <input className="swatch" type="color" value={el.coverColor} onChange={(e) => set({ coverColor: e.target.value })} />
+          <ColorPicker title="Hintergrund-Abdeckung" value={el.coverColor} onChange={(c) => set({ coverColor: c })} />
           <span className="insp-hint" style={{ margin: 0 }}>überdeckt das Original</span>
         </Row>
       )}
@@ -264,20 +281,20 @@ function ShapeProps({ el, set, radius }: { el: Extract<AnyElement, { type: 'rect
     <Group title={el.type === 'rect' ? 'Rechteck' : 'Ellipse'}>
       <Row>
         <label>Füllung</label>
-        <input className="swatch" type="color" value={el.fill ?? '#ffffff'} onChange={(e) => set({ fill: e.target.value })} />
+        <ColorPicker title="Füllfarbe" value={el.fill ?? '#ffffff'} onChange={(c) => set({ fill: c })} />
         <button className="btn ghost" onClick={() => set({ fill: null })}>
           ohne
         </button>
       </Row>
       <Row>
         <label>Rand</label>
-        <input className="swatch" type="color" value={el.stroke ?? '#111111'} onChange={(e) => set({ stroke: e.target.value })} />
-        <input className="field" type="number" min={0} max={20} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+        <ColorPicker title="Randfarbe" value={el.stroke ?? '#111111'} onChange={(c) => set({ stroke: c })} />
+        <input className="field field-sm" type="number" min={0} max={20} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
       </Row>
       {radius && el.type === 'rect' && (
         <Row>
           <label>Radius</label>
-          <input className="field" type="number" min={0} max={60} value={el.radius} onChange={(e) => set({ radius: Number(e.target.value) })} />
+          <input className="field field-sm" type="number" min={0} max={60} value={el.radius} onChange={(e) => set({ radius: Number(e.target.value) })} />
         </Row>
       )}
     </Group>

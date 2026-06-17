@@ -4,6 +4,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { TextRun } from './types';
 import { classifyFont, prettyFontName, BASELINE_RATIO } from './fonts';
+import { matchCatalogFontKey, fontDef } from './fontCatalog';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -166,7 +167,13 @@ export async function extractTextRuns(page: PDFPageProxy, rotation: number): Pro
     const baselineY = m[5];
 
     const styleFamily = content.styles?.[item.fontName]?.fontFamily as string | undefined;
-    const { family, bold, italic } = classifyFont(styleFamily ?? item.fontName);
+    const rawName = styleFamily ?? item.fontName;
+    const { family: baseFamily, bold, italic } = classifyFont(rawName);
+    // Prefer an exact catalogue match (Arial, Times New Roman, Roboto, …) so the
+    // displayed name AND the typeface used both reflect the document's real font.
+    // Only when the name is unknown do we fall back to the metric family.
+    const matchedKey = matchCatalogFontKey(rawName);
+    const family = matchedKey ?? baseFamily;
 
     const width = item.width || str.length * fontSize * 0.5;
     const height = fontSize * 1.18;
@@ -184,10 +191,10 @@ export async function extractTextRuns(page: PDFPageProxy, rotation: number): Pro
       bold,
       italic,
       fontName: item.fontName,
-      // Readable typeface name from the font pdf.js reports for this run — this is
-      // the document's real font name (e.g. "TimesNewRomanPS BoldMT"), shown in the
-      // scan editor's font panel so the user always sees the correct face.
-      fontLabel: prettyFontName(styleFamily ?? item.fontName),
+      // Readable typeface name shown in the scan editor's font panel. A catalogue
+      // match gives the canonical label (so a generic "sans-serif" never appears in
+      // the wrong style); otherwise the cleaned-up raw name.
+      fontLabel: matchedKey ? fontDef(matchedKey).label : prettyFontName(rawName),
     });
   }
 

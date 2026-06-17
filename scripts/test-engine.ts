@@ -310,6 +310,29 @@ async function run(): Promise<void> {
     ok('missing embedded font falls back to standard', text[0].includes('ORIGINAL'));
   }
 
+  // ── hidden elements are skipped; dashed/dotted ink bakes cleanly ──
+  console.log('\nhidden elements & dashed ink');
+  {
+    const fresh = await PDFDocument.load(await makeSamplePdf(['BASE']));
+    const els: AnyElement[] = [
+      textEl({ id: 'vis', text: 'SHOWN', x: 60, y: 120 }),
+      // Hidden text must NOT appear in the exported PDF.
+      textEl({ id: 'hid', text: 'SECRETHIDDEN', x: 60, y: 200, hidden: true } as Partial<AnyElement>),
+      // Dashed and dotted strokes must bake without throwing.
+      { id: 'dash', type: 'ink', x: 40, y: 260, width: 200, height: 4, opacity: 1, z: 5, points: [ { x: 40, y: 262 }, { x: 240, y: 262 } ], color: '#1a1a1a', strokeWidth: 3, dash: 'dashed' },
+      { id: 'dot', type: 'ink', x: 40, y: 300, width: 200, height: 4, opacity: 0.6, z: 6, points: [ { x: 40, y: 302 }, { x: 240, y: 302 } ], color: '#1a1a1a', strokeWidth: 3, dash: 'dotted' },
+      // A hidden ink stroke must also be skipped (no easy text proof, but must not throw).
+      { id: 'hink', type: 'ink', x: 40, y: 340, width: 100, height: 4, opacity: 1, z: 7, points: [ { x: 40, y: 342 }, { x: 140, y: 342 } ], color: '#cc0033', strokeWidth: 3, hidden: true } as AnyElement,
+    ];
+    const out = await exportInPlace(fresh, [{ sourceKey: 'main', sourceIndex: 0, addedRotation: 0, elements: els }], {});
+    const reread = await PDFDocument.load(out);
+    ok('document with dashed/dotted ink still loads', reread.getPageCount() === 1);
+    const text = await extractText(out);
+    ok('visible text baked', text[0].includes('SHOWN'));
+    ok('hidden text is omitted from export', !text[0].includes('SECRETHIDDEN'));
+    ok('original page content intact', text[0].includes('BASE'));
+  }
+
   // ── forms: fill + flatten ──
   console.log('\nforms (fill + flatten on rebuild)');
   {

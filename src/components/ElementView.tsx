@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { cssStackFor, embeddedFontFamily, BASELINE_RATIO, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
 import { nearestBaseline } from '../lib/utils/align';
+import { inkDashArray } from '../lib/utils/ink';
 import { Lock, Unlock } from 'lucide-react';
 
 // Screen-pixel tolerance for the visual baseline guide while dragging text — tight,
@@ -144,6 +145,10 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     window.addEventListener('pointerup', up);
   };
 
+  // Hidden elements (toggled off in the Elements panel) leave the canvas entirely and
+  // are skipped on export; they remain listed in the panel so they can be shown again.
+  if (el.hidden) return null;
+
   const base: React.CSSProperties = {
     left: el.x * scale,
     top: el.y * scale,
@@ -200,13 +205,27 @@ function ElementBody({
   pageId: string;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Grow the box to hug its content (text never wraps, so the on-screen line matches
+  // the export, which also doesn't wrap). A new field therefore starts compact and
+  // lengthens only as far as the typed line — never the old over-wide, over-tall box.
+  const fitToContent = (ta: HTMLTextAreaElement) => {
+    const w = (ta.scrollWidth + 2) / scale; // +2px: a little room for the end caret
+    const h = ta.scrollHeight / scale;
+    const width = Math.max(el.width, Math.round(w * 100) / 100);
+    const height = Math.max(el.height, Math.round(h * 100) / 100);
+    if (width !== el.width || height !== el.height) updateElement(pageId, el.id, { width, height });
+  };
+
   useEffect(() => {
     if (editing && taRef.current) {
       taRef.current.focus();
       // Pre-select the content so existing text turns blue and a single keystroke
       // replaces it — the caret is instantly ready for new fields too.
       taRef.current.select();
+      fitToContent(taRef.current);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
   switch (el.type) {
@@ -231,10 +250,15 @@ function ElementBody({
             ref={taRef}
             className="text-edit"
             style={textStyle}
+            // wrap=off so the textarea never soft-wraps: each line keeps its true width,
+            // which is what the auto-fit below measures (and what the export draws).
+            wrap="off"
             defaultValue={t.text}
             onChange={(e) => {
-              const grown = Math.max(el.height, e.currentTarget.scrollHeight / scale);
-              updateElement(pageId, el.id, { text: e.target.value, height: grown });
+              const ta = e.currentTarget;
+              const width = Math.max(el.width, (ta.scrollWidth + 2) / scale);
+              const height = Math.max(el.height, ta.scrollHeight / scale);
+              updateElement(pageId, el.id, { text: ta.value, width, height });
             }}
             onBlur={onEndEdit}
             onPointerDown={(e) => e.stopPropagation()}
@@ -295,10 +319,18 @@ function ElementBody({
           className="ink-body"
           width={el.width * scale}
           height={el.height * scale}
-          // Highlighter strokes blend like a real marker so text underneath stays legible.
+          // Highlighter / marker strokes blend like a real marker so text stays legible.
           style={el.highlight ? { mixBlendMode: 'multiply' } : undefined}
         >
-          <path d={d} fill="none" stroke={el.color} strokeWidth={el.strokeWidth * scale} strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d={d}
+            fill="none"
+            stroke={el.color}
+            strokeWidth={el.strokeWidth * scale}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray={inkDashArray(el.dash, el.strokeWidth * scale)}
+          />
         </svg>
       );
     }

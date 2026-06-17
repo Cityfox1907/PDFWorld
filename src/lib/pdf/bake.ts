@@ -31,6 +31,18 @@ function rgbColor(hex: string) {
   return rgb(c.r, c.g, c.b);
 }
 
+/**
+ * Dash pattern (in points) for a stroke of the given width, or undefined for a solid
+ * line. Scaled by the stroke width so the rhythm stays proportional at any thickness;
+ * 'dotted' uses a zero-length dash with a round cap so each mark renders as a dot.
+ */
+function dashArrayFor(dash: 'solid' | 'dashed' | 'dotted' | undefined, width: number): number[] | undefined {
+  const w = Math.max(0.5, width);
+  if (dash === 'dashed') return [w * 2.6, w * 2];
+  if (dash === 'dotted') return [0.01, w * 1.8];
+  return undefined;
+}
+
 function dataUrlToBytes(src: string): { bytes: Uint8Array; mime: string } {
   const comma = src.indexOf(',');
   const head = src.slice(0, comma);
@@ -141,9 +153,9 @@ export class Baker {
     }
   }
 
-  /** Bake every element of a page, respecting z-order. */
+  /** Bake every element of a page, respecting z-order. Hidden elements are skipped. */
   async bakePage(page: PDFPage, elements: AnyElement[], toPdfPoint: ToPdfPoint): Promise<void> {
-    const ordered = [...elements].sort((a, b) => a.z - b.z);
+    const ordered = [...elements].filter((e) => !e.hidden).sort((a, b) => a.z - b.z);
     for (const el of ordered) {
       try {
         await this.drawElement(page, el, toPdfPoint);
@@ -252,43 +264,27 @@ export class Baker {
     const conv = (p: { x: number; y: number }) =>
       rot ? toPdfPoint(...rotateViewPoint(p.x, p.y, cx, cy, rot)) : toPdfPoint(p.x, p.y);
 
-    // Highlighter pen: stroke the WHOLE path in one translucent Multiply operation so
-    // the marks read like a real highlighter — the text underneath stays readable and
-    // there is no per-segment darkening where the freehand stroke overlaps itself.
-    // pdf-lib's drawSvgPath flips the Y axis (SVG is y-down), so each content point's
-    // y is negated here; with x=y=0 and unit scale the path lands in content space 1:1.
-    if (el.highlight) {
-      const d = el.points
-        .map((p, i) => {
-          const c = conv(p);
-          return `${i === 0 ? 'M' : 'L'} ${c[0].toFixed(2)} ${(-c[1]).toFixed(2)}`;
-        })
-        .join(' ');
-      page.drawSvgPath(d, {
-        x: 0,
-        y: 0,
-        borderColor: rgbColor(el.color),
-        borderWidth: el.strokeWidth,
-        borderOpacity: el.opacity,
-        borderLineCap: LineCapStyle.Round,
-        blendMode: BlendMode.Multiply,
-      });
-      return;
-    }
-
-    const color = rgbColor(el.color);
-    for (let i = 1; i < el.points.length; i++) {
-      const a = conv(el.points[i - 1]);
-      const b = conv(el.points[i]);
-      page.drawLine({
-        start: { x: a[0], y: a[1] },
-        end: { x: b[0], y: b[1] },
-        thickness: el.strokeWidth,
-        color,
-        opacity: el.opacity,
-        lineCap: LineCapStyle.Round,
-      });
-    }
+    // The whole freehand path is stroked in ONE operation (pdf-lib's drawSvgPath).
+    // This keeps a translucent stroke even where it overlaps itself (no per-segment
+    // darkening), and lets dashed/dotted styles and a highlighter's Multiply blend
+    // apply to the line as a whole. drawSvgPath flips the Y axis (SVG is y-down), so
+    // each content point's y is negated; with x=y=0 and unit scale it lands 1:1.
+    const d = el.points
+      .map((p, i) => {
+        const c = conv(p);
+        return `${i === 0 ? 'M' : 'L'} ${c[0].toFixed(2)} ${(-c[1]).toFixed(2)}`;
+      })
+      .join(' ');
+    page.drawSvgPath(d, {
+      x: 0,
+      y: 0,
+      borderColor: rgbColor(el.color),
+      borderWidth: el.strokeWidth,
+      borderOpacity: el.opacity,
+      borderLineCap: LineCapStyle.Round,
+      borderDashArray: dashArrayFor(el.dash, el.strokeWidth),
+      blendMode: el.highlight ? BlendMode.Multiply : undefined,
+    });
   }
 
   private async drawText(page: PDFPage, el: TextElement, toPdfPoint: ToPdfPoint): Promise<void> {

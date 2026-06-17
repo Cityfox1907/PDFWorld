@@ -200,6 +200,10 @@ textarea {
   width: 34px;
   padding: 0;
 }
+.btn.icon.sm {
+  width: 26px;
+  height: 26px;
+}
 
 .kbd {
   font-size: 11px;

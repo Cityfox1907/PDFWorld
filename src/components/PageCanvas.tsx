@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, visibleSize, MAX_ZOOM, MIN_ZOOM, type EditorPage } from '../state/store';
+import { useUI } from '../state/ui';
+import { viewportBridge } from '../state/viewport';
 import {
   renderPageRegion,
   extractTextRuns,
@@ -19,6 +21,7 @@ import {
 } from '../lib/pdf';
 import { sampleBackground, sampleTextColor, sampleColorAt } from '../lib/utils/color';
 import { nearestBaseline } from '../lib/utils/align';
+import { inkDashArray } from '../lib/utils/ink';
 import { uid } from '../lib/utils/id';
 import { ElementView } from './ElementView';
 import { Type, Check, X, Plus } from 'lucide-react';
@@ -67,6 +70,9 @@ export function PageCanvas() {
   const setToolDefaults = useStore((s) => s.setToolDefaults);
   const addRecentColor = useStore((s) => s.addRecentColor);
   const showToast = useStore((s) => s.showToast);
+  const pendingTextStyle = useStore((s) => s.pendingTextStyle);
+  const setPendingTextStyle = useStore((s) => s.setPendingTextStyle);
+  const elementsPanelOpen = useUI((s) => s.elementsPanelOpen);
 
   const areaRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -326,24 +332,52 @@ export function PageCanvas() {
     };
   }, [activeTool, engine, pageSourceKey, pageSourceIndex, pageBlank, rotation]);
 
-  // ── zoom by Ctrl/⌘+wheel (also trackpad pinch) and two-finger touch pinch ──
+  // ── zoom keeping a chosen anchor point perfectly stationary ──
+  // Used by Ctrl/⌘+wheel and trackpad/touch pinch (anchor = the cursor) and by the
+  // TopBar +/- buttons (anchor = the centre of the visible window). The maths read the
+  // stage's REAL rendered rect before and after the scale change, so the page-point under
+  // the anchor lands back under it regardless of the centring margin — the document zooms
+  // into that exact spot instead of drifting toward the bottom-right.
   const zoomAround = useCallback((clientX: number, clientY: number, factor: number) => {
     const area = areaRef.current;
-    if (!area) return;
+    const stage = stageRef.current;
+    if (!area || !stage) return;
     const st = useStore.getState();
     const old = st.zoom;
     const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number((old * factor).toFixed(2))));
     if (next === old) return;
-    const rect = area.getBoundingClientRect();
-    const ax = clientX - rect.left + area.scrollLeft;
-    const ay = clientY - rect.top + area.scrollTop;
+    const before = stage.getBoundingClientRect();
+    const dx = clientX - before.left; // anchor offset inside the stage (old scale)
+    const dy = clientY - before.top;
     const ratio = next / old;
     st.setZoom(next);
     requestAnimationFrame(() => {
-      area.scrollLeft = ax * ratio - (clientX - rect.left);
-      area.scrollTop = ay * ratio - (clientY - rect.top);
+      const after = stage.getBoundingClientRect();
+      // Where that same page-point now sits, minus where we want it (the anchor).
+      area.scrollLeft += after.left + dx * ratio - clientX;
+      area.scrollTop += after.top + dy * ratio - clientY;
     });
   }, []);
+
+  // Zoom on the centre of the visible window — the anchor the +/- buttons use so the
+  // middle of what you're reading stays put.
+  const zoomByCenter = useCallback(
+    (factor: number) => {
+      const area = areaRef.current;
+      if (!area) return;
+      const rect = area.getBoundingClientRect();
+      zoomAround(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+    },
+    [zoomAround],
+  );
+
+  // Expose centre-zoom to the TopBar buttons via the viewport bridge.
+  useEffect(() => {
+    viewportBridge.zoomByCenter = zoomByCenter;
+    return () => {
+      if (viewportBridge.zoomByCenter === zoomByCenter) viewportBridge.zoomByCenter = undefined;
+    };
+  }, [zoomByCenter]);
 
   useEffect(() => {
     const area = areaRef.current;
@@ -503,6 +537,10 @@ export function PageCanvas() {
     if (activeTool === 'text') {
       // Keep focus for the editor we open below (see RunBox preventDefault note).
       e.preventDefault();
+      // A typeface armed from the scan panel ("In dieser Schrift schreiben") overrides
+      // the tool defaults, so the field lands here in exactly that font/size/style/colour.
+      const ps = pendingTextStyle;
+      const size = ps?.size ?? tool.textSize;
       const el: TextElement = {
         id: uid('el'),
         type: 'text',
@@ -510,21 +548,25 @@ export function PageCanvas() {
         // vertical middle of the first line (not the box top), so text lands on the
         // line you pointed at instead of dropping below it.
         x: start.x,
-        y: start.y - tool.textSize * 0.5,
-        width: 240,
-        height: Math.max(tool.textSize * 1.4, 22),
+        y: start.y - size * 0.5,
+        // Start compact — the field hugs its content and grows as you type (see the
+        // editor's auto-fit), instead of the old over-wide, over-long box.
+        width: Math.max(size * 3.6, 40),
+        height: Math.max(size * 1.25, 16),
         opacity: 1,
         z: nextZ(page),
         text: '',
-        family: tool.textFamily,
-        size: tool.textSize,
-        bold: false,
-        italic: false,
-        color: tool.textColor,
+        family: ps?.family ?? tool.textFamily,
+        size,
+        bold: ps?.bold ?? false,
+        italic: ps?.italic ?? false,
+        color: ps?.color ?? tool.textColor,
         align: 'left',
-        lineHeight: 1.3,
+        lineHeight: ps?.lineHeight ?? 1.3,
+        embeddedFontId: ps?.embeddedFontId,
       };
       addElement(page.id, el);
+      if (ps) setPendingTextStyle(null); // the armed typeface is now consumed
       // Switch to the select tool so the new field becomes interactive (a field
       // created under the text tool would otherwise stay pointer-events:none) and
       // jump straight into editing — the caret is ready, just start typing.
@@ -897,9 +939,19 @@ export function PageCanvas() {
 
   const startDrawing = (start: { x: number; y: number }) => {
     if (!page) return;
+    // Capture the pen's style once at the gesture start so the live preview and the
+    // committed stroke are identical: colour, thickness, opacity, marker (translucent
+    // Multiply) vs. pen, and the dash pattern (pen only).
+    const marker = tool.drawStyle === 'marker';
+    const style = {
+      color: tool.drawColor,
+      strokeWidth: tool.drawWidth,
+      opacity: Math.max(0.05, Math.min(1, tool.drawOpacity)),
+      highlight: marker,
+      dash: (marker ? 'solid' : tool.drawDash) as 'solid' | 'dashed' | 'dotted',
+    };
     const points: { x: number; y: number }[] = [start];
-    const move = (ev: PointerEvent) => {
-      points.push(evToView(ev));
+    const bounds = () => {
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
@@ -910,18 +962,21 @@ export function PageCanvas() {
         maxX = Math.max(maxX, p.x);
         maxY = Math.max(maxY, p.y);
       }
+      return { minX, minY, maxX, maxY };
+    };
+    const move = (ev: PointerEvent) => {
+      points.push(evToView(ev));
+      const b = bounds();
       setDraft({
         id: 'draft-ink',
         type: 'ink',
-        x: minX,
-        y: minY,
-        width: maxX - minX,
-        height: maxY - minY,
-        opacity: 1,
+        x: b.minX,
+        y: b.minY,
+        width: b.maxX - b.minX,
+        height: b.maxY - b.minY,
         z: nextZ(page),
         points: [...points],
-        color: tool.drawColor,
-        strokeWidth: tool.drawWidth,
+        ...style,
       });
     };
     const up = () => {
@@ -929,28 +984,17 @@ export function PageCanvas() {
       window.removeEventListener('pointerup', up);
       setDraft(null);
       if (points.length > 1) {
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-        for (const p of points) {
-          minX = Math.min(minX, p.x);
-          minY = Math.min(minY, p.y);
-          maxX = Math.max(maxX, p.x);
-          maxY = Math.max(maxY, p.y);
-        }
+        const b = bounds();
         addElement(page.id, {
           id: uid('el'),
           type: 'ink',
-          x: minX,
-          y: minY,
-          width: Math.max(1, maxX - minX),
-          height: Math.max(1, maxY - minY),
-          opacity: 1,
+          x: b.minX,
+          y: b.minY,
+          width: Math.max(1, b.maxX - b.minX),
+          height: Math.max(1, b.maxY - b.minY),
           z: nextZ(page),
           points,
-          color: tool.drawColor,
-          strokeWidth: tool.drawWidth,
+          ...style,
         });
       }
     };
@@ -996,38 +1040,27 @@ export function PageCanvas() {
     setPickedRun(idx);
   };
 
-  // Single scan action: drop an EMPTY text field exactly on the detected line, in its
-  // IDENTICAL typeface — original font 1:1 when embedded, plus the same size, the same
-  // BOLD / ITALIC style and the same ink colour — and open it ready to type. There is
-  // deliberately NO background cover (no Hintergrundfarbe), so the original page content
-  // underneath is never painted over and nothing is rasterised: pure, lossless editing.
-  // The field shows the "Text…" placeholder until you type.
-  const insertMatchingField = (idx: number) => {
+  // Scan action: ARM the detected line's IDENTICAL typeface — original font 1:1 when
+  // embedded, plus the same size, BOLD / ITALIC style and ink colour — then let the user
+  // choose WHERE it lands. No field is dropped here; the next click on the page places an
+  // empty text box in exactly this font, ready to type. There is deliberately NO
+  // background cover, so the original page content underneath is never painted over.
+  const armMatchingField = (idx: number) => {
     const run = runs[idx];
     if (!run || !page) return;
     const { color } = pickInfo ?? sampleRun(run);
-    const el: TextElement = {
-      id: uid('el'),
-      type: 'text',
-      x: run.x,
-      y: run.y,
-      width: Math.max(run.width, 80),
-      height: Math.max(run.height, run.fontSize * 1.25),
-      opacity: 1,
-      z: nextZ(page),
-      text: '', // empty → shows the "Text…" placeholder, ready to type
+    setPendingTextStyle({
       family: run.family, // metric fallback when the original font can't be embedded
       size: run.fontSize, // identical size
       bold: run.bold, // identical weight — bold stays bold
       italic: run.italic, // identical style — italic stays italic
       color,
-      align: 'left',
       lineHeight: 1.15,
       embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
-    };
-    addElement(page.id, el); // commits history + selects the new element
+    });
     setPickedRun(null);
-    setEditingId(el.id); // open the editor right away (caret ready, just start typing)
+    setTool('text'); // arm placement; the next click drops the field in this font
+    showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
   };
 
   // Adopt the line's detected ink colour as the default for new text everywhere.
@@ -1063,7 +1096,7 @@ export function PageCanvas() {
         <canvas ref={canvasRef} className="page-canvas" />
         <div
           ref={overlayRef}
-          className="overlay"
+          className={`overlay ${elementsPanelOpen ? 'reveal' : ''}`}
           style={{ width: view.width * scale, height: view.height * scale }}
           onPointerDown={onOverlayPointerDown}
         >
@@ -1111,7 +1144,7 @@ export function PageCanvas() {
             color={pickInfo?.color ?? '#111111'}
             stageW={view.width * scale}
             stageH={view.height * scale}
-            onInsert={() => insertMatchingField(pickedRun)}
+            onInsert={() => armMatchingField(pickedRun)}
             onUseColor={useDetectedColor}
             onClose={() => setPickedRun(null)}
           />
@@ -1148,7 +1181,15 @@ function DraftView({ el, scale }: { el: AnyElement; scale: number }) {
           mixBlendMode: el.highlight ? 'multiply' : undefined,
         }}
       >
-        <path d={d} fill="none" stroke={el.color} strokeWidth={el.strokeWidth * scale} strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d={d}
+          fill="none"
+          stroke={el.color}
+          strokeWidth={el.strokeWidth * scale}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray={inkDashArray(el.dash, el.strokeWidth * scale)}
+        />
       </svg>
     );
   }
@@ -1270,11 +1311,11 @@ function FontInfoPanel({
         <button
           className="btn primary"
           onClick={onInsert}
-          title="Leeres Textfeld in genau dieser Schrift (Grösse, Fett/Kursiv, Farbe) einfügen – ohne Hintergrund-Abdeckung"
+          title="Diese Schrift übernehmen – anschliessend auf die Stelle klicken, an der das Textfeld eingefügt werden soll (ohne Hintergrund-Abdeckung)"
         >
           <Plus size={14} /> In dieser Schrift schreiben
         </button>
-        <p className="font-panel-foot">Leeres Feld in derselben Schrift · ohne Abdeckung</p>
+        <p className="font-panel-foot">Danach auf die gewünschte Stelle klicken · ohne Abdeckung</p>
       </div>
     </div>
   );

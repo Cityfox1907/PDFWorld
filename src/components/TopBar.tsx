@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useStore } from '../state/store';
 import { useUI } from '../state/ui';
+import { viewportBridge } from '../state/viewport';
 import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2, Moon, Sun } from 'lucide-react';
 
 export function TopBar() {
@@ -20,7 +21,14 @@ export function TopBar() {
   const mergeRef = useRef<HTMLInputElement>(null);
 
   // Multiplicative steps traverse the wide 25 %–2000 % range in a handful of clicks.
-  const zoomBy = (factor: number) => setZoom(zoom * factor);
+  // Route through the canvas so the magnification stays anchored on the centre of the
+  // visible window (it falls back to a plain set if the canvas isn't mounted yet).
+  const zoomBy = (factor: number) => {
+    if (viewportBridge.zoomByCenter) viewportBridge.zoomByCenter(factor);
+    else setZoom(zoom * factor);
+  };
+  // Reset to 100 % from wherever we are, keeping the centre anchored.
+  const resetZoom = () => zoomBy(1 / zoom);
 
   return (
     <div className="topbar">
@@ -46,7 +54,7 @@ export function TopBar() {
           <button className="seg-btn" onClick={() => zoomBy(1 / 1.25)} title="Verkleinern" disabled={zoom <= 0.25}>
             <ZoomOut size={16} />
           </button>
-          <button className="seg-btn zoom-label" onClick={() => setZoom(1)} title="Zoom zurücksetzen (100 %)">
+          <button className="seg-btn zoom-label" onClick={resetZoom} title="Zoom zurücksetzen (100 %)">
             {Math.round(zoom * 100)}%
           </button>
           <button className="seg-btn" onClick={() => zoomBy(1.25)} title="Vergrössern (bis 2000 %)" disabled={zoom >= 20}>

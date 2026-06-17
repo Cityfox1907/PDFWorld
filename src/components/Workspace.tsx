@@ -4,6 +4,7 @@ import { useUI } from '../state/ui';
 import { TopBar } from './TopBar';
 import { ToolRail } from './ToolRail';
 import { PageSidebar } from './PageSidebar';
+import { ElementsPanel } from './ElementsPanel';
 import { PageCanvas } from './PageCanvas';
 import { Inspector } from './Inspector';
 import { SignatureModal } from './SignatureModal';
@@ -101,6 +102,7 @@ export function Workspace() {
       <div className="workspace-body">
         <PageSidebar />
         <ToolRail />
+        <ElementsPanel />
         <PageCanvas />
         <Inspector />
       </div>

@@ -57,6 +57,12 @@ export interface ToolDefaults {
   highlightWidth: number;
   drawColor: string;
   drawWidth: number;
+  /** stroke opacity for the pen/marker (0.05–1) */
+  drawOpacity: number;
+  /** pen = opaque line, marker = translucent Multiply stroke (like a highlighter) */
+  drawStyle: 'pen' | 'marker';
+  /** line style for the pen: solid, dashed or dotted */
+  drawDash: 'solid' | 'dashed' | 'dotted';
   shapeFill: string;
   shapeStroke: string;
   /** background brush shape: a freehand stroke, or a borderless filled rectangle */
@@ -72,6 +78,21 @@ interface Snapshot {
   formValues: Record<string, string | boolean | string[]>;
   selectedElementId: string | null;
   currentPageId: string | null;
+}
+
+/**
+ * A captured typeface armed by the scan tool ("In dieser Schrift schreiben"). Instead
+ * of dropping a field immediately, the next click on the page places an empty text box
+ * carrying exactly these properties — so the user chooses *where* the text lands.
+ */
+export interface PendingTextStyle {
+  family: FontFamilyKey;
+  size: number;
+  bold: boolean;
+  italic: boolean;
+  color: string;
+  lineHeight: number;
+  embeddedFontId?: string;
 }
 
 interface StoreState {
@@ -99,6 +120,8 @@ interface StoreState {
   recentColors: string[];
   /** A single copied element kept for paste (Cmd/Ctrl+C → V), across pages. */
   clipboard: AnyElement | null;
+  /** A typeface armed from the scan panel; the next click places a field in it. */
+  pendingTextStyle: PendingTextStyle | null;
 
   past: Snapshot[];
   future: Snapshot[];
@@ -119,6 +142,8 @@ interface StoreState {
   setToolDefaults: (patch: Partial<ToolDefaults>) => void;
   /** Remember a colour at the front of the recent list (deduped, capped). */
   addRecentColor: (color: string) => void;
+  /** Arm (or clear) the typeface that the next page click writes in. */
+  setPendingTextStyle: (style: PendingTextStyle | null) => void;
 
   // ── elements ──
   addElement: (pageId: string, el: AnyElement) => void;
@@ -165,6 +190,9 @@ const DEFAULT_TOOL: ToolDefaults = {
   highlightWidth: 16,
   drawColor: '#1a1a1a',
   drawWidth: 2.5,
+  drawOpacity: 1,
+  drawStyle: 'pen',
+  drawDash: 'solid',
   shapeFill: '#ffffff',
   shapeStroke: '#111111',
   brushMode: 'brush',
@@ -213,6 +241,7 @@ export const useStore = create<StoreState>((set, get) => ({
   tool: { ...DEFAULT_TOOL },
   recentColors: [],
   clipboard: null,
+  pendingTextStyle: null,
 
   past: [],
   future: [],
@@ -322,7 +351,13 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setTool(tool) {
-    set({ activeTool: tool, selectedElementId: tool === 'select' ? get().selectedElementId : null });
+    set({
+      activeTool: tool,
+      selectedElementId: tool === 'select' ? get().selectedElementId : null,
+      // An armed scan typeface only survives while the text tool is active (it is placed
+      // on the next click); choosing any other tool discards it.
+      pendingTextStyle: tool === 'text' ? get().pendingTextStyle : null,
+    });
   },
   setZoom(zoom) {
     // Up to 2000 % magnification (MIN 25 %). The page bitmap is resolution-capped
@@ -341,6 +376,9 @@ export const useStore = create<StoreState>((set, get) => ({
   addRecentColor(color) {
     const hex = toHex(color);
     set((s) => ({ recentColors: [hex, ...s.recentColors.filter((c) => c !== hex)].slice(0, 9) }));
+  },
+  setPendingTextStyle(style) {
+    set({ pendingTextStyle: style });
   },
 
   addElement(pageId, el) {

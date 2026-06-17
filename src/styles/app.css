@@ -718,6 +718,168 @@ svg.draft {
   flex-shrink: 0;
   box-shadow: var(--shadow-sm);
 }
+/* Compact numeric field (font size, stroke width, radius) so it sits beside a
+   colour swatch and the style toggles without stealing the whole row. */
+.field-sm {
+  flex: 0 0 auto;
+  width: 58px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* A full-width inspector button (e.g. "use brush colour for text"). */
+.insp-wide {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 9px;
+}
+
+/* ── COLOR PICKER ──────────────────────────────────────────────────────────
+   A friendlier replacement for the bare <input type=color>: a swatch trigger and
+   a popover with a curated palette, recent/sampled colours, a hex field, the OS
+   dialog and (where supported) a document eyedropper. */
+.color-picker {
+  position: relative;
+  flex-shrink: 0;
+}
+.color-swatch-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  padding: 2px;
+  display: block;
+  overflow: hidden;
+  /* a soft checker peeks through translucent tones */
+  background-image:
+    linear-gradient(45deg, var(--line-2) 25%, transparent 25%, transparent 75%, var(--line-2) 75%),
+    linear-gradient(45deg, var(--line-2) 25%, transparent 25%, transparent 75%, var(--line-2) 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 5px 5px;
+  transition: border-color 0.15s, transform 0.1s var(--ease);
+}
+.color-swatch-btn:hover {
+  border-color: var(--accent);
+}
+.color-swatch-btn:active {
+  transform: scale(0.94);
+}
+.color-swatch-chip {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+.color-pop {
+  position: fixed;
+  z-index: 130;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  animation: pop 0.16s var(--ease);
+}
+.color-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 5px;
+}
+.color-cell {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+  transition: transform 0.1s var(--ease), border-color 0.1s, box-shadow 0.1s;
+}
+.color-cell:hover {
+  transform: scale(1.14);
+  border-color: var(--accent);
+  z-index: 1;
+}
+.color-cell.active {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent);
+}
+.color-pop-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
+}
+.color-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.color-native {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.color-native input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.color-native-ring {
+  display: block;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: conic-gradient(from 90deg, #ff3b30, #ffcc00, #34c759, #00c7be, #0a84ff, #5856d6, #af52de, #ff3b30);
+}
+.color-native:hover .color-native-ring {
+  border-color: var(--accent);
+}
+.color-hex {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  outline: none;
+  font-size: 12.5px;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.color-hex:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.color-eyedrop {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+.color-eyedrop:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
 
 /* Font picker — a custom dropdown so every option previews in its own typeface
    (native <select> options can't be reliably styled per-font across browsers). */
@@ -1113,6 +1275,18 @@ svg.draft {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The detected line redrawn in its own typeface — an immediate, honest preview. */
+.font-panel-preview {
+  font-size: 19px;
+  line-height: 1.25;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .font-panel-badge {
   display: flex;
   align-items: center;
@@ -1142,11 +1316,17 @@ svg.draft {
   font-variant-numeric: tabular-nums;
 }
 .font-panel-swatch {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
   border: 1px solid var(--line);
   margin-left: auto;
+  cursor: pointer;
+  transition: transform 0.1s var(--ease), border-color 0.1s;
+}
+.font-panel-swatch:hover {
+  transform: scale(1.12);
+  border-color: var(--accent);
 }
 .font-panel-actions {
   display: flex;

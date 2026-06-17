@@ -1,7 +1,8 @@
-/** Normalise a CSS-ish color to #rrggbb; falls back to black. */
+/** Normalise a CSS-ish color to a lowercase #rrggbb; falls back to black. The
+ *  lowercase output keeps colour de-duplication and swatch highlighting reliable. */
 export function toHex(input: string): string {
   if (!input) return '#000000';
-  let h = input.trim();
+  let h = input.trim().toLowerCase();
   if (h.startsWith('#')) {
     if (h.length === 4) h = '#' + h.slice(1).split('').map((c) => c + c).join('');
     return h.slice(0, 7);

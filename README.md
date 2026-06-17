@@ -21,19 +21,28 @@ die bestehenden Seiten eingezeichnet.
 ### 2. Bearbeitung
 - **Text scannen & bearbeiten** – ein Scan erkennt jede Textzeile und bündelt sie
   zu klickbaren Blöcken. Beim Antippen zeigt ein **Schrift-Panel** den echten
-  Schriftnamen, Grösse, Stil und Farbe der Zeile und ob die **Originalschrift**
-  eingebettet (und damit 1:1 nutzbar) ist. Mit **„Originalschrift übernehmen“** wird
-  ein Textfeld in exakt dieser Schrift eingefügt – am Bildschirm wie beim Export
-  identisch; Grösse, Stil, Farbe (und optional der Hintergrund) werden mitübernommen
+  Schriftnamen, eine **Vorschau in genau dieser Schrift**, Grösse, Stil und Farbe
+  der Zeile und ob die **Originalschrift** eingebettet (und damit 1:1 nutzbar) ist.
+  Generische Namen wie „sans-serif“ werden korrekt der richtigen Familie zugeordnet
+  und bekannte Schriften (Arial, Times New Roman, Roboto …) exakt benannt – so
+  stimmen angezeigter Name und tatsächlich genutzte Schrift immer überein. Mit
+  **„Originalschrift übernehmen“** wird die Zeile in exakt dieser Schrift ersetzt,
+  mit **„Neues Feld darunter · 9 pt“** ein leeres Feld in derselben Schrift direkt
+  unter der Zeile angelegt
 - **Pixelgenaue Ausrichtung** – ausgewählte Felder lassen sich mit den **Pfeiltasten**
   verschieben (1 pt, mit Shift 10 pt); beim Bewegen rastet ein Textfeld auf der
   **Grundlinie der Nachbarzeile** ein (sichtbare Hilfslinie, Alt hält frei), damit
   nebeneinanderstehende Texte nie versetzt wirken
 - **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
-  Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied
-- **Neuen Text** hinzufügen – Standardschrift **Arial**, Auswahl aus einem Font-Picker
-  mit **~90 Schriften**, der jeden Namen in seiner eigenen Schrift zeigt (System-,
-  Standard- & Web-Schriften)
+  Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied. Die aufgenommene
+  Farbe wandert in die **Farbauswahl** und lässt sich per Klick als Schriftfarbe
+  weiterverwenden
+- **Neuen Text** hinzufügen – Standard **Grösse 9** und **Schwarz**, Auswahl aus
+  einem Font-Picker mit **~90 Schriften**, der jeden Namen in seiner eigenen Schrift
+  zeigt (System-, Standard- & Web-Schriften)
+- **Farbauswahl** – ein aufgeräumter Farbwähler mit kuratierter Palette, zuletzt
+  verwendeten Tönen und – wo der Browser es unterstützt – einer **Pipette**, die eine
+  Farbe direkt aus dem Dokument aufnimmt
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
 - **Bilder** platzieren

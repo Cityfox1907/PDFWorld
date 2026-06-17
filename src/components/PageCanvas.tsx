@@ -8,6 +8,9 @@ import {
   registerEmbeddedFont,
   embeddedFontFamily,
   cssStackFor,
+  matchCatalogFontKey,
+  isGenericFontLabel,
+  isInternalFontName,
   BASELINE_RATIO,
   type AnyElement,
   type ElementPatch,
@@ -18,7 +21,7 @@ import { sampleBackground, sampleTextColor, sampleColorAt } from '../lib/utils/c
 import { nearestBaseline } from '../lib/utils/align';
 import { uid } from '../lib/utils/id';
 import { ElementView } from './ElementView';
-import { Type, Check, X } from 'lucide-react';
+import { Type, Check, X, Plus } from 'lucide-react';
 
 const DEVICE_PIXEL_RATIO = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 // Density at which the visible window is rasterised. We render at (at least) the
@@ -54,6 +57,8 @@ export function PageCanvas() {
   const selectElement = useStore((s) => s.selectElement);
   const setTool = useStore((s) => s.setTool);
   const setToolDefaults = useStore((s) => s.setToolDefaults);
+  const addRecentColor = useStore((s) => s.addRecentColor);
+  const showToast = useStore((s) => s.showToast);
 
   const areaRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -293,7 +298,15 @@ export function PageCanvas() {
             registerEmbeddedFont({ id, data: info.data, mimetype: info.mimetype || 'font/opentype' });
             embeddedFontId = id;
           }
-          return { ...l, fontLabel: l.fontLabel ?? info?.displayName, embedded: info?.embedded ?? false, embeddedFontId };
+          // The real font name from the PDF (info.displayName, taken from the font's
+          // own /BaseFont) is the most accurate. Prefer it whenever the run-level
+          // label is only a generic family ("Sans-Serif") so the panel never shows a
+          // placeholder when a true name is available — and refine the fallback family.
+          const realName = info?.displayName;
+          const useReal = !!realName && !isGenericFontLabel(realName) && !isInternalFontName(realName) && (!l.fontLabel || isGenericFontLabel(l.fontLabel));
+          const fontLabel = useReal ? realName : (l.fontLabel ?? realName);
+          const family = (useReal && matchCatalogFontKey(realName)) || l.family;
+          return { ...l, family, fontLabel, embedded: info?.embedded ?? false, embeddedFontId };
         });
         if (!cancelled) setRuns(enriched);
       } catch {
@@ -526,6 +539,7 @@ export function PageCanvas() {
     const { px, ox, oy } = sampleMap();
     const color = canvas ? sampleColorAt(canvas, start.x, start.y, px, ox, oy) : '#ffffff';
     setToolDefaults({ brushColor: color });
+    addRecentColor(color); // make the sampled tone reusable in any colour picker
     const width = tool.brushWidth;
     const points: { x: number; y: number }[] = [start];
     const bounds = () => {
@@ -753,6 +767,46 @@ export function PageCanvas() {
     setEditingId(el.id); // open the editor right away (text pre-selected, ready to type)
   };
 
+  // "Neues Feld darunter": drop an EMPTY text box directly beneath the detected line,
+  // in the SAME typeface (original 1:1 when embedded), fixed at 9 pt and the line's
+  // own ink colour — ready to type. Ideal for writing an answer under a label.
+  const addFieldBelow = (idx: number) => {
+    const run = runs[idx];
+    if (!run || !page) return;
+    const { color } = pickInfo ?? sampleRun(run);
+    const size = 9;
+    const gap = Math.max(2, run.fontSize * 0.3);
+    const el: TextElement = {
+      id: uid('el'),
+      type: 'text',
+      x: run.x,
+      y: run.y + run.height + gap,
+      width: Math.max(run.width, 120),
+      height: Math.max(size * 1.4, 14),
+      opacity: 1,
+      z: nextZ(page),
+      text: '',
+      family: run.family, // metric fallback if the original font can't be embedded
+      size,
+      bold: run.bold,
+      italic: run.italic,
+      color,
+      align: 'left',
+      lineHeight: 1.3,
+      embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
+    };
+    addElement(page.id, el);
+    setPickedRun(null);
+    setEditingId(el.id);
+  };
+
+  // Adopt the line's detected ink colour as the default for new text everywhere.
+  const useDetectedColor = (color: string) => {
+    setToolDefaults({ textColor: color });
+    addRecentColor(color);
+    showToast('Farbe für neuen Text übernommen', 'success');
+  };
+
   // A detected line is "consumed" once a text box has been adopted at its position,
   // so its clickable box never reappears (and a second adopt can't stack on it).
   const runIsTaken = useCallback(
@@ -828,6 +882,8 @@ export function PageCanvas() {
             stageW={view.width * scale}
             stageH={view.height * scale}
             onAdopt={(cover) => adoptRun(pickedRun, cover)}
+            onAddBelow={() => addFieldBelow(pickedRun)}
+            onUseColor={useDetectedColor}
             onClose={() => setPickedRun(null)}
           />
         )}
@@ -910,6 +966,8 @@ function FontInfoPanel({
   stageW,
   stageH,
   onAdopt,
+  onAddBelow,
+  onUseColor,
   onClose,
 }: {
   run: TextRun;
@@ -918,15 +976,18 @@ function FontInfoPanel({
   stageW: number;
   stageH: number;
   onAdopt: (cover: boolean) => void;
+  onAddBelow: () => void;
+  onUseColor: (color: string) => void;
   onClose: () => void;
 }) {
   const previewFamily = embeddedFontFamily(run.embeddedFontId) ?? cssStackFor(run.family);
-  const width = 256;
+  const width = 268;
   const left = Math.max(4, Math.min(run.x * scale, stageW - width - 4));
-  const estH = 168;
+  const estH = 256;
   const below = (run.y + run.height) * scale + 8;
   const top = below + estH > stageH ? Math.max(4, run.y * scale - estH - 8) : below;
   const styleBits = [run.bold ? 'Fett' : null, run.italic ? 'Kursiv' : null].filter(Boolean).join(' · ');
+  const sample = (run.str || 'Aa Bb Cc 0123').trim().slice(0, 28);
 
   return (
     <div className="font-panel" style={{ left, top, width }} onPointerDown={(e) => e.stopPropagation()}>
@@ -939,6 +1000,13 @@ function FontInfoPanel({
       </div>
       <div className="font-panel-name" style={{ fontFamily: previewFamily }}>
         {run.fontLabel || 'Unbekannt'}
+      </div>
+      {/* The detected line drawn in its OWN typeface — an immediate, honest preview. */}
+      <div
+        className="font-panel-preview"
+        style={{ fontFamily: previewFamily, fontWeight: run.bold ? 700 : 400, fontStyle: run.italic ? 'italic' : 'normal', color }}
+      >
+        {sample}
       </div>
       <div className={`font-panel-badge ${run.embedded === true ? 'ok' : run.embedded === false ? 'warn' : 'neutral'}`}>
         {run.embedded === true ? (
@@ -954,14 +1022,22 @@ function FontInfoPanel({
       <div className="font-panel-meta">
         <span>{Math.round(run.fontSize)} pt</span>
         {styleBits && <span>{styleBits}</span>}
-        <span className="font-panel-swatch" style={{ background: color }} title={color} />
+        <button
+          className="font-panel-swatch"
+          style={{ background: color }}
+          title="Diese Schriftfarbe für neuen Text übernehmen"
+          onClick={() => onUseColor(color)}
+        />
       </div>
       <div className="font-panel-actions">
         <button className="btn primary" onClick={() => onAdopt(true)}>
           Originalschrift übernehmen
         </button>
+        <button className="btn" onClick={onAddBelow} title="Leeres Textfeld in gleicher Schrift (9 pt) direkt unter dieser Zeile anlegen">
+          <Plus size={14} /> Neues Feld darunter · 9 pt
+        </button>
         <button className="btn ghost sm" onClick={() => onAdopt(false)} title="Feld ohne Hintergrund-Abdeckung einfügen">
-          ohne Abdeckung
+          ohne Abdeckung einfügen
         </button>
       </div>
     </div>

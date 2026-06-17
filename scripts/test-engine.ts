@@ -9,7 +9,8 @@
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { makeToPdfPoint, placeBox } from '../src/lib/pdf/coords.ts';
 import { exportInPlace, exportRebuild, isIdentityArrangement, BLANK_SOURCE, type ExportPageSpec } from '../src/lib/pdf/pages.ts';
-import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf } from '../src/lib/pdf/fontCatalog.ts';
+import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf, matchCatalogFontKey } from '../src/lib/pdf/fontCatalog.ts';
+import { classifyFont, prettyFontName } from '../src/lib/pdf/fonts.ts';
 import { registerEmbeddedFont, getEmbeddedFont, embeddedFontFamily } from '../src/lib/pdf/embeddedFonts.ts';
 import type { AnyElement } from '../src/lib/pdf/types.ts';
 
@@ -127,6 +128,33 @@ async function run(): Promise<void> {
     ok('captured original font bytes are retrievable for export', getEmbeddedFont('src#0#f7')?.data === data);
     ok('no @font-face family without a DOM (graceful)', embeddedFontFamily('src#0#f7') === undefined);
     ok('uncaptured id returns nothing', getEmbeddedFont('missing') === undefined);
+  }
+
+  // ── scan font classification + catalogue matching (the "two fonts" bug) ──
+  console.log('\nfonts (scan classification + name matching)');
+  {
+    // The core regression: the generic CSS family "sans-serif" must NOT be read as
+    // serif just because its compact form "sansserif" contains "serif".
+    ok('generic "sans-serif" classifies as sans', classifyFont('sans-serif').family === 'sans');
+    ok('generic "serif" classifies as serif', classifyFont('serif').family === 'serif');
+    ok('generic "monospace" classifies as mono', classifyFont('monospace').family === 'mono');
+    ok('subset Arial classifies as sans + bold', classifyFont('ABCDEE+Arial-BoldMT').family === 'sans' && classifyFont('ABCDEE+Arial-BoldMT').bold);
+    ok('Times New Roman italic classifies as serif + italic', classifyFont('TimesNewRomanPS-ItalicMT').family === 'serif' && classifyFont('TimesNewRomanPS-ItalicMT').italic);
+    ok('Courier classifies as mono', classifyFont('CourierNewPSMT').family === 'mono');
+
+    // Precise name → catalogue key, so the panel shows the real font (not a generic).
+    ok('ArialMT → arial', matchCatalogFontKey('ArialMT') === 'arial');
+    ok('subset Arial-BoldMT → arial', matchCatalogFontKey('XYZABC+Arial-BoldMT') === 'arial');
+    ok('TimesNewRomanPS-BoldMT → times-new-roman', matchCatalogFontKey('TimesNewRomanPS-BoldMT') === 'times-new-roman');
+    ok('Helvetica-Oblique → helvetica', matchCatalogFontKey('Helvetica-Oblique') === 'helvetica');
+    ok('Roboto-Medium → roboto', matchCatalogFontKey('Roboto-Medium') === 'roboto');
+    ok('CalibriBold → calibri', matchCatalogFontKey('CalibriBold') === 'calibri');
+    ok('a matched key carries the right metric family', baseFamilyOf(matchCatalogFontKey('TimesNewRomanPSMT')!) === 'serif');
+    ok('generic "sans-serif" is NOT mis-matched to a font', matchCatalogFontKey('sans-serif') === null);
+
+    // Friendly labels keep a generic family readable instead of "sans serif".
+    ok('prettyFontName maps generic sans-serif → Sans-Serif', prettyFontName('sans-serif') === 'Sans-Serif');
+    ok('prettyFontName strips subset prefix', prettyFontName('ABCDEE+Arial') === 'Arial');
   }
 
   // ── in-place export preserves original text + adds overlay ──

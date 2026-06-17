@@ -11,7 +11,16 @@ export type { ExportPageSpec, ExportOptions } from './pages';
 export { Baker } from './bake';
 export { makeToPdfPoint, placeBox, axisAngleDeg, snapRightAngle } from './coords';
 export type { ToPdfPoint, BoxPlacement } from './coords';
-export { standardFontFor, classifyFont, prettyFontName, FontStore, BASELINE_RATIO } from './fonts';
+export {
+  standardFontFor,
+  classifyFont,
+  prettyFontName,
+  compactFontName,
+  isGenericFontLabel,
+  isInternalFontName,
+  FontStore,
+  BASELINE_RATIO,
+} from './fonts';
 export {
   FONT_CATALOG,
   DEFAULT_FONT_KEY,
@@ -19,6 +28,7 @@ export {
   baseFamilyOf,
   cssStackFor,
   fontFileUrl,
+  matchCatalogFontKey,
   injectFontFaces,
 } from './fontCatalog';
 export type { FontDef } from './fontCatalog';

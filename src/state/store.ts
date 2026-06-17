@@ -11,6 +11,7 @@ import {
 } from '../lib/pdf';
 import { readFileBytes } from '../lib/utils/file';
 import { uid } from '../lib/utils/id';
+import { toHex } from '../lib/utils/color';
 
 export type ToolId =
   | 'select'
@@ -82,6 +83,9 @@ interface StoreState {
   xfaForm: boolean;
 
   tool: ToolDefaults;
+  /** Recently used / sampled colours, newest first — shared by every colour picker
+   *  so a tone picked with the brush (or eyedropper) is reusable in new text. */
+  recentColors: string[];
 
   past: Snapshot[];
   future: Snapshot[];
@@ -100,6 +104,8 @@ interface StoreState {
   setCurrentPage: (id: string) => void;
   selectElement: (id: string | null) => void;
   setToolDefaults: (patch: Partial<ToolDefaults>) => void;
+  /** Remember a colour at the front of the recent list (deduped, capped). */
+  addRecentColor: (color: string) => void;
 
   // ── elements ──
   addElement: (pageId: string, el: AnyElement) => void;
@@ -132,9 +138,9 @@ interface StoreState {
 }
 
 const DEFAULT_TOOL: ToolDefaults = {
-  textColor: '#111111',
+  textColor: '#000000',
   textFamily: 'arial',
-  textSize: 16,
+  textSize: 9,
   highlightColor: '#ffd84d',
   drawColor: '#1a1a1a',
   drawWidth: 2.5,
@@ -183,6 +189,7 @@ export const useStore = create<StoreState>((set, get) => ({
   xfaForm: false,
 
   tool: { ...DEFAULT_TOOL },
+  recentColors: [],
 
   past: [],
   future: [],
@@ -307,6 +314,10 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setToolDefaults(patch) {
     set((s) => ({ tool: { ...s.tool, ...patch } }));
+  },
+  addRecentColor(color) {
+    const hex = toHex(color);
+    set((s) => ({ recentColors: [hex, ...s.recentColors.filter((c) => c !== hex)].slice(0, 9) }));
   },
 
   addElement(pageId, el) {

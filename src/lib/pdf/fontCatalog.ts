@@ -1,4 +1,5 @@
 import type { BaseFamily } from './types';
+import { compactFontName } from './fonts';
 
 /**
  * Curated catalogue of the ~90 most-used document fonts.
@@ -191,6 +192,83 @@ export function fontDef(key: string): FontDef {
 
 export function baseFamilyOf(key: string): BaseFamily {
   return fontDef(key).base;
+}
+
+/**
+ * Common PostScript/PDF font names that don't equal a catalogue label once
+ * compacted. Mapping them explicitly means a scanned line reports the *correct*
+ * named font (Arial, Times New Roman, …) instead of falling back to a generic
+ * family — so the panel name and the typeface actually used never disagree.
+ */
+const FONT_ALIASES: Record<string, string> = {
+  arialmt: 'arial',
+  arial: 'arial',
+  arialnarrow: 'arial',
+  arialblack: 'arial',
+  ariaunicodems: 'arial',
+  helvetica: 'helvetica',
+  helveticaneue: 'helvetica',
+  helveticalt: 'helvetica',
+  helveticaltstd: 'helvetica',
+  times: 'times-new-roman',
+  timesroman: 'times-new-roman',
+  timesnewroman: 'times-new-roman',
+  timesnewromanps: 'times-new-roman',
+  couriernew: 'courier-new',
+  couriernewps: 'courier-new',
+  courier: 'courier-new',
+  courierstd: 'courier-new',
+  trebuchetms: 'trebuchet',
+  segoeui: 'segoe-ui',
+  calibri: 'calibri',
+  cambria: 'cambria',
+  consolas: 'consolas',
+  georgia: 'georgia',
+  verdana: 'verdana',
+  tahoma: 'tahoma',
+  garamond: 'garamond',
+};
+
+/** Compacted catalogue label *and* key → key, for exact hits like "roboto". */
+const CATALOG_BY_COMPACT = new Map<string, string>();
+for (const f of FONT_CATALOG) {
+  CATALOG_BY_COMPACT.set(compactFontName(f.label), f.key);
+  CATALOG_BY_COMPACT.set(compactFontName(f.key), f.key);
+}
+
+/**
+ * Trailing weight/style/foundry tokens that aren't part of a family's identity.
+ * Stripped one at a time (longest-first) with an exact re-check after each strip,
+ * so "Arial-BoldMT" → "arial" and "Roboto-Medium" → "roboto" while a real name
+ * like "timesnewroman" is never eroded (we only ever require an *exact* match).
+ */
+const TRAILING_TOKENS = ['psmt', 'mt', 'ps', 'bolditalic', 'boldoblique', 'semibolditalic', 'italic', 'oblique', 'bold', 'semibold', 'demibold', 'demi', 'extrabold', 'ultrabold', 'heavy', 'black', 'medium', 'light', 'extralight', 'ultralight', 'thin', 'hairline', 'regular', 'normal'];
+
+/**
+ * Resolve a raw PDF/CSS font name to a specific catalogue key (e.g. "ArialMT" →
+ * "arial", "TimesNewRomanPS-BoldMT" → "times-new-roman"), or null when the name
+ * isn't a known font. Callers then fall back to the metric classification.
+ */
+export function matchCatalogFontKey(rawName: string | undefined | null): string | null {
+  let c = compactFontName(rawName);
+  if (!c) return null;
+  if (FONT_ALIASES[c]) return FONT_ALIASES[c];
+  if (CATALOG_BY_COMPACT.has(c)) return CATALOG_BY_COMPACT.get(c)!;
+
+  let changed = true;
+  while (changed && c.length > 2) {
+    changed = false;
+    for (const t of TRAILING_TOKENS) {
+      if (c.length > t.length && c.endsWith(t)) {
+        c = c.slice(0, -t.length);
+        if (FONT_ALIASES[c]) return FONT_ALIASES[c];
+        if (CATALOG_BY_COMPACT.has(c)) return CATALOG_BY_COMPACT.get(c)!;
+        changed = true;
+        break;
+      }
+    }
+  }
+  return null;
 }
 
 /** CSS font-family stack for previewing a font on screen (real font + system fallback). */

@@ -7,6 +7,7 @@ import {
   rgb,
   degrees,
   LineCapStyle,
+  BlendMode,
 } from 'pdf-lib';
 import type { AnyElement, TextElement, RectElement, EllipseElement, HighlightElement, ImageElement, InkElement } from './types';
 import { standardFontFor, BASELINE_RATIO } from './fonts';
@@ -245,12 +246,37 @@ export class Baker {
 
   private drawInk(page: PDFPage, el: InkElement, toPdfPoint: ToPdfPoint): void {
     if (el.points.length < 2) return;
-    const color = rgbColor(el.color);
     const rot = el.rotation ?? 0;
     const cx = el.x + el.width / 2;
     const cy = el.y + el.height / 2;
     const conv = (p: { x: number; y: number }) =>
       rot ? toPdfPoint(...rotateViewPoint(p.x, p.y, cx, cy, rot)) : toPdfPoint(p.x, p.y);
+
+    // Highlighter pen: stroke the WHOLE path in one translucent Multiply operation so
+    // the marks read like a real highlighter — the text underneath stays readable and
+    // there is no per-segment darkening where the freehand stroke overlaps itself.
+    // pdf-lib's drawSvgPath flips the Y axis (SVG is y-down), so each content point's
+    // y is negated here; with x=y=0 and unit scale the path lands in content space 1:1.
+    if (el.highlight) {
+      const d = el.points
+        .map((p, i) => {
+          const c = conv(p);
+          return `${i === 0 ? 'M' : 'L'} ${c[0].toFixed(2)} ${(-c[1]).toFixed(2)}`;
+        })
+        .join(' ');
+      page.drawSvgPath(d, {
+        x: 0,
+        y: 0,
+        borderColor: rgbColor(el.color),
+        borderWidth: el.strokeWidth,
+        borderOpacity: el.opacity,
+        borderLineCap: LineCapStyle.Round,
+        blendMode: BlendMode.Multiply,
+      });
+      return;
+    }
+
+    const color = rgbColor(el.color);
     for (let i = 1; i < el.points.length; i++) {
       const a = conv(el.points[i - 1]);
       const b = conv(el.points[i]);

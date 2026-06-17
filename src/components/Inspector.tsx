@@ -59,12 +59,20 @@ export function Inspector() {
             </Group>
           )}
           {el.type === 'ink' && (
-            <Group title="Zeichnung">
+            <Group title={el.highlight ? 'Markierung' : 'Zeichnung'}>
               <Row>
                 <label>Farbe</label>
-                <ColorPicker title="Linienfarbe" value={el.color} onChange={(c) => set({ color: c })} />
+                <ColorPicker title={el.highlight ? 'Markierungsfarbe' : 'Linienfarbe'} value={el.color} onChange={(c) => set({ color: c })} />
                 <label>Stärke</label>
-                <input type="range" min={1} max={12} step={0.5} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) }, false)} onMouseUp={commit} />
+                <input
+                  type="range"
+                  min={el.highlight ? 6 : 1}
+                  max={el.highlight ? 48 : 12}
+                  step={el.highlight ? 1 : 0.5}
+                  value={el.strokeWidth}
+                  onChange={(e) => set({ strokeWidth: Number(e.target.value) }, false)}
+                  onMouseUp={commit}
+                />
               </Row>
             </Group>
           )}
@@ -144,10 +152,32 @@ export function Inspector() {
       return (
         <Group title="Markieren">
           <Row>
+            <label>Form</label>
+            <div className="seg insp-seg">
+              <button className={`seg-btn ${tool.highlightMode === 'rect' ? 'active' : ''}`} onClick={() => setToolDefaults({ highlightMode: 'rect' })}>
+                Rechteck
+              </button>
+              <button className={`seg-btn ${tool.highlightMode === 'brush' ? 'active' : ''}`} onClick={() => setToolDefaults({ highlightMode: 'brush' })}>
+                Stift
+              </button>
+            </div>
+          </Row>
+          <Row>
             <label>Farbe</label>
             <ColorPicker title="Markierungsfarbe" value={tool.highlightColor} onChange={(c) => setToolDefaults({ highlightColor: c })} />
           </Row>
-          <p className="insp-hint">Über Text ziehen, um ihn zu markieren.</p>
+          {tool.highlightMode === 'brush' && (
+            <Row>
+              <label>Stärke</label>
+              <input type="range" min={6} max={48} step={1} value={tool.highlightWidth} onChange={(e) => setToolDefaults({ highlightWidth: Number(e.target.value) })} />
+              <span className="insp-val">{Math.round(tool.highlightWidth)}</span>
+            </Row>
+          )}
+          <p className="insp-hint">
+            {tool.highlightMode === 'brush'
+              ? 'Wie ein Textmarker frei über den Text zeichnen – die ovale Spitze hinterlässt eine durchscheinende Spur.'
+              : 'Über Text ziehen, um ihn rechteckig zu markieren.'}
+          </p>
         </Group>
       );
     }
@@ -184,13 +214,14 @@ export function Inspector() {
     }
     if (activeTool === 'cut') {
       return (
-        <Group title="Ausschneiden">
+        <Group title="Bereich duplizieren">
           <p className="insp-hint">
-            Ziehe ein Rechteck auf: der Bereich wird ausgeschnitten und als frei
-            verschiebbares Stück eingefügt (direkt angewählt). Die ursprüngliche Stelle
-            wird mit ihrer eigenen Hintergrundfarbe abgedeckt. Das Stück lässt sich wie
-            jedes Element verschieben, <strong>duplizieren</strong> (⌘/Strg + D) und
-            <strong> kopieren</strong> (⌘/Strg + C · V).
+            Ziehe ein Rechteck auf: der Bereich wird in <strong>voller Originalqualität
+            (1:1)</strong> dupliziert und als frei verschiebbares Stück eingefügt (direkt
+            angewählt). Das <strong>Original bleibt vollständig erhalten</strong> – nichts
+            wird herausgeschnitten oder überdeckt. Das Stück lässt sich verschieben,
+            <strong> duplizieren</strong> (⌘/Strg + D) und <strong>kopieren</strong>
+            (⌘/Strg + C · V).
           </p>
         </Group>
       );
@@ -199,17 +230,30 @@ export function Inspector() {
       return (
         <Group title="Hintergrund-Pinsel">
           <Row>
-            <label>Stärke</label>
-            <input
-              type="range"
-              min={4}
-              max={64}
-              step={1}
-              value={tool.brushWidth}
-              onChange={(e) => setToolDefaults({ brushWidth: Number(e.target.value) })}
-            />
-            <span className="insp-val">{Math.round(tool.brushWidth)}</span>
+            <label>Form</label>
+            <div className="seg insp-seg">
+              <button className={`seg-btn ${tool.brushMode === 'brush' ? 'active' : ''}`} onClick={() => setToolDefaults({ brushMode: 'brush' })}>
+                Pinsel
+              </button>
+              <button className={`seg-btn ${tool.brushMode === 'rect' ? 'active' : ''}`} onClick={() => setToolDefaults({ brushMode: 'rect' })}>
+                Rechteck
+              </button>
+            </div>
           </Row>
+          {tool.brushMode === 'brush' && (
+            <Row>
+              <label>Stärke</label>
+              <input
+                type="range"
+                min={4}
+                max={64}
+                step={1}
+                value={tool.brushWidth}
+                onChange={(e) => setToolDefaults({ brushWidth: Number(e.target.value) })}
+              />
+              <span className="insp-val">{Math.round(tool.brushWidth)}</span>
+            </Row>
+          )}
           <Row>
             <label>Aufgenommen</label>
             <span className="swatch-preview" style={{ background: tool.brushColor }} />
@@ -227,9 +271,10 @@ export function Inspector() {
             <Type size={15} /> Farbe für Text übernehmen
           </button>
           <p className="insp-hint">
-            Male über eine Stelle — der Pinsel nimmt automatisch die exakte Hintergrundfarbe
-            direkt darunter auf und überdeckt den Inhalt unsichtbar. Die aufgenommene Farbe
-            landet auch in der Farbauswahl unter „Zuletzt verwendet“.
+            {tool.brushMode === 'rect'
+              ? 'Ziehe ein Rechteck auf – es wird randlos mit der Hintergrundfarbe direkt unter dem Startpunkt gefüllt und deckt den Bereich unsichtbar ab.'
+              : 'Male über eine Stelle — der Pinsel nimmt automatisch die exakte Hintergrundfarbe direkt darunter auf und überdeckt den Inhalt unsichtbar.'}{' '}
+            Die aufgenommene Farbe landet auch in der Farbauswahl unter „Zuletzt verwendet“.
           </p>
         </Group>
       );
@@ -240,10 +285,9 @@ export function Inspector() {
           <p className="insp-hint">
             Erkannte Textzeilen werden markiert. Klicke auf eine Zeile, um ihre echte
             Schrift zu sehen — Name, Grösse, Stil, Farbe und ob die Originalschrift
-            eingebettet ist. Mit <strong>„Originalschrift übernehmen“</strong> wird ein
-            Textfeld in exakt dieser Schrift eingefügt — oder lege mit
-            <strong> „Neues Feld darunter“</strong> direkt ein leeres Feld (9 pt) in
-            derselben Schrift an.
+            eingebettet ist. Mit <strong>„In dieser Schrift schreiben“</strong> wird ein
+            leeres Textfeld in <strong>exakt dieser Schrift</strong> (Grösse, Fett/Kursiv,
+            Farbe) eingefügt — ohne Hintergrund-Abdeckung, direkt zum Tippen.
           </p>
           <p className="insp-hint">
             Tipp: Mit den Pfeiltasten verschiebst du ein Feld Pixel für Pixel. Liegt die

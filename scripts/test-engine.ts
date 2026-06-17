@@ -291,6 +291,8 @@ async function run(): Promise<void> {
       { id: 'e', type: 'ellipse', x: 120, y: 20, width: 60, height: 60, opacity: 1, z: 2, fill: null, stroke: '#0a84ff', strokeWidth: 1.5 },
       { id: 'h', type: 'highlight', x: 40, y: 120, width: 120, height: 18, opacity: 0.4, z: 3, color: '#ffe24d' },
       { id: 'k', type: 'ink', x: 40, y: 200, width: 100, height: 50, opacity: 1, z: 4, points: [ { x: 40, y: 200 }, { x: 90, y: 250 }, { x: 140, y: 200 } ], color: '#cc0033', strokeWidth: 3 },
+      // Highlighter pen: a single translucent Multiply stroke (drawSvgPath path).
+      { id: 'hp', type: 'ink', x: 40, y: 160, width: 130, height: 24, opacity: 0.4, z: 4.5, points: [ { x: 40, y: 168 }, { x: 100, y: 176 }, { x: 168, y: 162 } ], color: '#ffe24d', strokeWidth: 14, highlight: true },
       { id: 'i', type: 'image', x: 200, y: 200, width: 60, height: 60, opacity: 1, z: 5, src: PNG_1x1, aspect: 1 },
       { id: 's', type: 'signature', x: 200, y: 300, width: 120, height: 40, opacity: 1, z: 6, src: PNG_1x1, aspect: 3 },
       textEl({ id: 'm', text: 'MULTI\nLINE', align: 'center', x: 60, y: 300 }),

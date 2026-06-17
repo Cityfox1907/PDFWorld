@@ -37,6 +37,12 @@ const MAX_BITMAP_AREA = 16_000_000;
 // Extra CSS px rendered just outside the viewport so small scrolls reveal already-
 // sharp content instead of a blank edge while the next window render lands.
 const OVERSCAN = 128;
+// The cut/duplicate tool snapshots a region straight from the PDF (never from the
+// screen bitmap) at this minimum density — ~288 DPI, print grade — so the floating
+// copy stays razor-sharp regardless of the current zoom. Capped by MAX_BITMAP_* below.
+const CUT_MIN_DENSITY = 4;
+// Highlighter pen opacity (Multiply blend keeps the text underneath readable).
+const HIGHLIGHT_OPACITY = 0.4;
 // Magnification limits (25 %–2000 %) come from the store so the clamp lives once.
 // How close (in screen pixels) a text baseline must be to a neighbour's before the
 // alignment guide lights up. Small, because the guide is a pure visual confirmation
@@ -53,7 +59,6 @@ export function PageCanvas() {
   const activeTool = useStore((s) => s.activeTool);
   const tool = useStore((s) => s.tool);
   const addElement = useStore((s) => s.addElement);
-  const addElements = useStore((s) => s.addElements);
   const updateElement = useStore((s) => s.updateElement);
   const deleteElement = useStore((s) => s.deleteElement);
   const commit = useStore((s) => s.commit);
@@ -536,7 +541,15 @@ export function PageCanvas() {
       return;
     }
     if (activeTool === 'brush') {
-      startBrush(start, e);
+      // Background brush: a freehand stroke, or a borderless rectangle filled with the
+      // sampled page background (so a block can be cleared in one drag).
+      if (tool.brushMode === 'rect') startBgRect(start, e);
+      else startBrush(start, e);
+      return;
+    }
+    if (activeTool === 'highlight' && tool.highlightMode === 'brush') {
+      // Marker tool in pen mode: a freehand highlighter stroke with a round nib.
+      startHighlightStroke(start, e);
       return;
     }
     startShape(start, e);
@@ -611,6 +624,130 @@ export function PageCanvas() {
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
+  // ── highlighter pen: a freehand marker stroke with a round (oval) nib ──
+  // Same gesture as the background brush, but the stroke is a semi-transparent
+  // highlight (Multiply blend in the bake layer) so the text underneath stays legible.
+  const startHighlightStroke = (start: { x: number; y: number }, e: React.PointerEvent) => {
+    if (!page) return;
+    const color = tool.highlightColor;
+    const width = tool.highlightWidth;
+    const points: { x: number; y: number }[] = [start];
+    const bounds = () => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of points) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      const pad = width / 2;
+      return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+    };
+    const move = (ev: PointerEvent) => {
+      points.push(evToView(ev));
+      const b = bounds();
+      setDraft({
+        id: 'draft-highlight',
+        type: 'ink',
+        x: b.minX,
+        y: b.minY,
+        width: b.maxX - b.minX,
+        height: b.maxY - b.minY,
+        opacity: HIGHLIGHT_OPACITY,
+        z: nextZ(page),
+        points: [...points],
+        color,
+        strokeWidth: width,
+        highlight: true,
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setDraft(null);
+      // A single tap still leaves a dab; duplicate the point so the bake draws it.
+      if (points.length === 1) points.push({ x: start.x + 0.01, y: start.y + 0.01 });
+      const b = bounds();
+      addElement(page.id, {
+        id: uid('el'),
+        type: 'ink',
+        x: b.minX,
+        y: b.minY,
+        width: Math.max(1, b.maxX - b.minX),
+        height: Math.max(1, b.maxY - b.minY),
+        opacity: HIGHLIGHT_OPACITY,
+        z: nextZ(page),
+        points,
+        color,
+        strokeWidth: width,
+        highlight: true,
+      });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  // ── background brush, rectangle mode: drag a borderless box filled with the page's
+  // own background colour (sampled at the click) so a whole block clears in one drag ──
+  const startBgRect = (start: { x: number; y: number }, e: React.PointerEvent) => {
+    if (!page) return;
+    const canvas = canvasRef.current;
+    const { px, ox, oy } = sampleMap();
+    const color = canvas ? sampleColorAt(canvas, start.x, start.y, px, ox, oy) : '#ffffff';
+    setToolDefaults({ brushColor: color });
+    addRecentColor(color);
+    const move = (ev: PointerEvent) => {
+      const p = evToView(ev);
+      const x = Math.min(start.x, p.x);
+      const y = Math.min(start.y, p.y);
+      setDraft({
+        id: 'draft-bgrect',
+        type: 'rect',
+        x,
+        y,
+        width: Math.abs(p.x - start.x),
+        height: Math.abs(p.y - start.y),
+        opacity: 1,
+        z: nextZ(page),
+        fill: color,
+        stroke: null,
+        strokeWidth: 0,
+        radius: 0,
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setDraft((d) => {
+        if (d && d.width > 2 && d.height > 2) {
+          addElement(page.id, {
+            id: uid('el'),
+            type: 'rect',
+            x: d.x,
+            y: d.y,
+            width: d.width,
+            height: d.height,
+            opacity: 1,
+            z: nextZ(page),
+            fill: color,
+            stroke: null,
+            strokeWidth: 0,
+            radius: 0,
+          });
+          setTool('select');
+        }
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
   const startShape = (start: { x: number; y: number }, e: React.PointerEvent) => {
     if (!page) return;
     const base = { id: uid('el'), x: start.x, y: start.y, width: 0, height: 0, opacity: 1, z: nextZ(page) };
@@ -645,8 +782,9 @@ export function PageCanvas() {
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
-  // ── cut-out tool: marquee a region, snapshot its pixels into a movable image and
-  // cover the original spot with its own background so the piece reads as "cut out". ──
+  // ── region-duplicate tool ("Ausschneiden"): marquee a rectangle and lift a free-
+  // floating 1:1 copy of it. The ORIGINAL page content is never cut out or covered —
+  // the copy simply lies on top, ready to drag away, leaving the document untouched. ──
   const startCut = (start: { x: number; y: number }, e: React.PointerEvent) => {
     if (!page) return;
     const move = (ev: PointerEvent) => {
@@ -672,7 +810,7 @@ export function PageCanvas() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       setDraft((d) => {
-        if (d && d.width > 4 && d.height > 4) cutRegion(d.x, d.y, d.width, d.height);
+        if (d && d.width > 4 && d.height > 4) void cutRegion(d.x, d.y, d.width, d.height);
         return null;
       });
     };
@@ -681,54 +819,79 @@ export function PageCanvas() {
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
-  const cutRegion = (x: number, y: number, w: number, h: number) => {
+  // Rasterise a page region STRAIGHT FROM THE PDF (not the screen bitmap) at a high,
+  // print-grade density, so the duplicate is a 1:1 copy of the original at any zoom —
+  // never the screen's current resolution. Returns a lossless PNG data URL, or null
+  // (blank pages / render failure) so the caller can fall back to the on-screen copy.
+  const captureRegionHiRes = async (vx: number, vy: number, vw: number, vh: number): Promise<string | null> => {
+    if (!page || page.blank) return null;
+    try {
+      const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
+      const wanted = Math.max(CUT_MIN_DENSITY, scale * TARGET_DENSITY);
+      const cap = Math.min(MAX_BITMAP_DIM / vw, MAX_BITMAP_DIM / vh, Math.sqrt(MAX_BITMAP_AREA / (vw * vh)));
+      const density = Math.max(1, Math.min(wanted, cap));
+      const off = document.createElement('canvas');
+      off.width = Math.max(1, Math.round(vw * density));
+      off.height = Math.max(1, Math.round(vh * density));
+      await renderPageRegion(pdfPage, off, density, rotation, vx * density, vy * density);
+      return off.toDataURL('image/png');
+    } catch {
+      return null;
+    }
+  };
+
+  // Fallback copy from the on-screen bitmap (used for blank pages, where there is no
+  // PDF content to re-rasterise — the region is just paper colour anyway).
+  const captureRegionFromScreen = (vx: number, vy: number, vw: number, vh: number): string | null => {
     const canvas = canvasRef.current;
-    if (!canvas || !page) return;
-    // Map the view-space rectangle to bitmap pixels via the last render's origin +
-    // density, then clamp to what's actually painted (the visible window).
+    if (!canvas) return null;
     const { px, ox, oy } = sampleMap();
-    const sx = Math.max(0, Math.round(x * px - ox));
-    const sy = Math.max(0, Math.round(y * px - oy));
-    const ex = Math.min(canvas.width, Math.round((x + w) * px - ox));
-    const ey = Math.min(canvas.height, Math.round((y + h) * px - oy));
+    const sx = Math.max(0, Math.round(vx * px - ox));
+    const sy = Math.max(0, Math.round(vy * px - oy));
+    const ex = Math.min(canvas.width, Math.round((vx + vw) * px - ox));
+    const ey = Math.min(canvas.height, Math.round((vy + vh) * px - oy));
     const cw = ex - sx;
     const ch = ey - sy;
-    if (cw <= 1 || ch <= 1) {
-      showToast('Bereich liegt ausserhalb des sichtbaren Fensters.', 'error');
-      return;
-    }
+    if (cw <= 1 || ch <= 1) return null;
     const off = document.createElement('canvas');
     off.width = cw;
     off.height = ch;
     const octx = off.getContext('2d');
-    if (!octx) return;
+    if (!octx) return null;
     octx.drawImage(canvas, sx, sy, cw, ch, 0, 0, cw, ch);
-    let src: string;
     try {
-      src = off.toDataURL('image/png');
+      return off.toDataURL('image/png');
     } catch {
-      showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
+      return null;
+    }
+  };
+
+  const cutRegion = async (x: number, y: number, w: number, h: number) => {
+    if (!page) return;
+    // Clamp the marquee to the page. We can lift any part of the page (not only the
+    // visible window) because the region is re-rendered straight from the PDF.
+    const vx = Math.max(0, x);
+    const vy = Math.max(0, y);
+    const vw = Math.min(view.width, x + w) - vx;
+    const vh = Math.min(view.height, y + h) - vy;
+    if (vw <= 1 || vh <= 1) {
+      showToast('Bereich ist zu klein.', 'error');
       return;
     }
 
-    // The exact view-space rect that was captured (after clamping).
-    const vx = (sx + ox) / px;
-    const vy = (sy + oy) / px;
-    const vw = cw / px;
-    const vh = ch / px;
+    const src = (await captureRegionHiRes(vx, vy, vw, vh)) ?? captureRegionFromScreen(vx, vy, vw, vh);
+    if (!src) {
+      showToast('Bereich konnte nicht dupliziert werden.', 'error');
+      return;
+    }
 
-    const bg = sampleBackground(canvas, { x: vx, y: vy, width: vw, height: vh }, px, ox, oy);
-    const z = nextZ(page);
-    // Cover the hole with the region's own background, the snapshot floats on top.
-    const cover: AnyElement = {
-      id: uid('el'), type: 'rect', x: vx, y: vy, width: vw, height: vh,
-      opacity: 1, z, fill: bg, stroke: null, strokeWidth: 0, radius: 0,
-    };
+    // A free-floating, full-quality duplicate of the region. Nothing is removed from
+    // or painted over the page — the original content stays exactly as it was.
     const piece: AnyElement = {
       id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh,
-      opacity: 1, z: z + 1, src, aspect: vw / vh,
+      opacity: 1, z: nextZ(page), src, aspect: vw / vh,
     };
-    addElements(page.id, [cover, piece], piece.id); // one undo step, piece selected
+    addElement(page.id, piece); // one undo step, piece selected, ready to drag away
     setTool('select');
   };
 
@@ -833,70 +996,38 @@ export function PageCanvas() {
     setPickedRun(idx);
   };
 
-  // "Originalschrift übernehmen": drop a text box at the line, in its EXACT typeface,
-  // size, style and colour, pre-filled with the line's text and ready to edit. With
-  // `cover` it also hides the original glyphs (sampled background); without it the
-  // user covers the original themselves with the brush.
-  const adoptRun = (idx: number, cover: boolean) => {
+  // Single scan action: drop an EMPTY text field exactly on the detected line, in its
+  // IDENTICAL typeface — original font 1:1 when embedded, plus the same size, the same
+  // BOLD / ITALIC style and the same ink colour — and open it ready to type. There is
+  // deliberately NO background cover (no Hintergrundfarbe), so the original page content
+  // underneath is never painted over and nothing is rasterised: pure, lossless editing.
+  // The field shows the "Text…" placeholder until you type.
+  const insertMatchingField = (idx: number) => {
     const run = runs[idx];
     if (!run || !page) return;
-    const { color, bg } = pickInfo ?? sampleRun(run);
+    const { color } = pickInfo ?? sampleRun(run);
     const el: TextElement = {
       id: uid('el'),
       type: 'text',
       x: run.x,
       y: run.y,
-      width: Math.max(run.width, 24),
+      width: Math.max(run.width, 80),
       height: Math.max(run.height, run.fontSize * 1.25),
       opacity: 1,
       z: nextZ(page),
-      text: run.str,
-      family: run.family, // metric fallback if the original font can't be embedded
-      size: run.fontSize,
-      bold: run.bold,
-      italic: run.italic,
+      text: '', // empty → shows the "Text…" placeholder, ready to type
+      family: run.family, // metric fallback when the original font can't be embedded
+      size: run.fontSize, // identical size
+      bold: run.bold, // identical weight — bold stays bold
+      italic: run.italic, // identical style — italic stays italic
       color,
       align: 'left',
       lineHeight: 1.15,
-      coverColor: cover ? bg : undefined, // hides the original glyphs on screen + export
       embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
     };
     addElement(page.id, el); // commits history + selects the new element
     setPickedRun(null);
-    setEditingId(el.id); // open the editor right away (text pre-selected, ready to type)
-  };
-
-  // "Neues Feld darunter": drop an EMPTY text box directly beneath the detected line,
-  // in the SAME typeface (original 1:1 when embedded), fixed at 9 pt and the line's
-  // own ink colour — ready to type. Ideal for writing an answer under a label.
-  const addFieldBelow = (idx: number) => {
-    const run = runs[idx];
-    if (!run || !page) return;
-    const { color } = pickInfo ?? sampleRun(run);
-    const size = 9;
-    const gap = Math.max(2, run.fontSize * 0.3);
-    const el: TextElement = {
-      id: uid('el'),
-      type: 'text',
-      x: run.x,
-      y: run.y + run.height + gap,
-      width: Math.max(run.width, 120),
-      height: Math.max(size * 1.4, 14),
-      opacity: 1,
-      z: nextZ(page),
-      text: '',
-      family: run.family, // metric fallback if the original font can't be embedded
-      size,
-      bold: run.bold,
-      italic: run.italic,
-      color,
-      align: 'left',
-      lineHeight: 1.3,
-      embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
-    };
-    addElement(page.id, el);
-    setPickedRun(null);
-    setEditingId(el.id);
+    setEditingId(el.id); // open the editor right away (caret ready, just start typing)
   };
 
   // Adopt the line's detected ink colour as the default for new text everywhere.
@@ -980,8 +1111,7 @@ export function PageCanvas() {
             color={pickInfo?.color ?? '#111111'}
             stageW={view.width * scale}
             stageH={view.height * scale}
-            onAdopt={(cover) => adoptRun(pickedRun, cover)}
-            onAddBelow={() => addFieldBelow(pickedRun)}
+            onInsert={() => insertMatchingField(pickedRun)}
             onUseColor={useDetectedColor}
             onClose={() => setPickedRun(null)}
           />
@@ -1007,7 +1137,17 @@ function DraftView({ el, scale }: { el: AnyElement; scale: number }) {
   if (el.type === 'ink') {
     const d = el.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x - el.x) * scale} ${(p.y - el.y) * scale}`).join(' ');
     return (
-      <svg className="draft" style={{ left: el.x * scale, top: el.y * scale, width: el.width * scale, height: el.height * scale }}>
+      <svg
+        className="draft"
+        style={{
+          left: el.x * scale,
+          top: el.y * scale,
+          width: el.width * scale,
+          height: el.height * scale,
+          opacity: el.opacity,
+          mixBlendMode: el.highlight ? 'multiply' : undefined,
+        }}
+      >
         <path d={d} fill="none" stroke={el.color} strokeWidth={el.strokeWidth * scale} strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
@@ -1064,8 +1204,7 @@ function FontInfoPanel({
   color,
   stageW,
   stageH,
-  onAdopt,
-  onAddBelow,
+  onInsert,
   onUseColor,
   onClose,
 }: {
@@ -1074,8 +1213,7 @@ function FontInfoPanel({
   color: string;
   stageW: number;
   stageH: number;
-  onAdopt: (cover: boolean) => void;
-  onAddBelow: () => void;
+  onInsert: () => void;
   onUseColor: (color: string) => void;
   onClose: () => void;
 }) {
@@ -1129,15 +1267,14 @@ function FontInfoPanel({
         />
       </div>
       <div className="font-panel-actions">
-        <button className="btn primary" onClick={() => onAdopt(true)}>
-          Originalschrift übernehmen
+        <button
+          className="btn primary"
+          onClick={onInsert}
+          title="Leeres Textfeld in genau dieser Schrift (Grösse, Fett/Kursiv, Farbe) einfügen – ohne Hintergrund-Abdeckung"
+        >
+          <Plus size={14} /> In dieser Schrift schreiben
         </button>
-        <button className="btn" onClick={onAddBelow} title="Leeres Textfeld in gleicher Schrift (9 pt) direkt unter dieser Zeile anlegen">
-          <Plus size={14} /> Neues Feld darunter · 9 pt
-        </button>
-        <button className="btn ghost sm" onClick={() => onAdopt(false)} title="Feld ohne Hintergrund-Abdeckung einfügen">
-          ohne Abdeckung einfügen
-        </button>
+        <p className="font-panel-foot">Leeres Feld in derselben Schrift · ohne Abdeckung</p>
       </div>
     </div>
   );

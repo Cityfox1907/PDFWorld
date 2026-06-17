@@ -237,6 +237,21 @@
 .seg-btn:disabled {
   opacity: 0.4;
 }
+/* Selected option in a toggle group (tool shape pickers in the inspector). */
+.seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+.seg-btn.active:hover:not(:disabled) {
+  background: var(--accent);
+}
+/* A segmented toggle stretched across an inspector row. */
+.insp-seg {
+  flex: 1;
+}
+.insp-seg .seg-btn {
+  flex: 1;
+}
 .zoom-label {
   min-width: 48px;
 }
@@ -1382,4 +1397,10 @@ svg.draft {
 .font-panel-actions .btn.sm {
   font-size: 11px;
   padding: 5px 8px;
+}
+.font-panel-foot {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+  text-align: center;
 }

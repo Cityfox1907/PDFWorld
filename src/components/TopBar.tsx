@@ -19,7 +19,7 @@ export function TopBar() {
   const toggleTheme = useUI((s) => s.toggleTheme);
   const mergeRef = useRef<HTMLInputElement>(null);
 
-  // Multiplicative steps traverse the wide 25 %–1000 % range in a handful of clicks.
+  // Multiplicative steps traverse the wide 25 %–2000 % range in a handful of clicks.
   const zoomBy = (factor: number) => setZoom(zoom * factor);
 
   return (
@@ -49,7 +49,7 @@ export function TopBar() {
           <button className="seg-btn zoom-label" onClick={() => setZoom(1)} title="Zoom zurücksetzen (100 %)">
             {Math.round(zoom * 100)}%
           </button>
-          <button className="seg-btn" onClick={() => zoomBy(1.25)} title="Vergrössern (bis 1000 %)" disabled={zoom >= 10}>
+          <button className="seg-btn" onClick={() => zoomBy(1.25)} title="Vergrössern (bis 2000 %)" disabled={zoom >= 20}>
             <ZoomIn size={16} />
           </button>
         </div>

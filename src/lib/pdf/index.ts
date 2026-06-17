@@ -9,7 +9,7 @@ export {
 } from './pages';
 export type { ExportPageSpec, ExportOptions } from './pages';
 export { Baker } from './bake';
-export { makeToPdfPoint, placeBox, axisAngleDeg, snapRightAngle } from './coords';
+export { makeToPdfPoint, placeBox, placeRotatedBox, rotateViewPoint, axisAngleDeg, snapRightAngle } from './coords';
 export type { ToPdfPoint, BoxPlacement } from './coords';
 export {
   standardFontFor,

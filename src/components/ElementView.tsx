@@ -1,7 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import { cssStackFor, embeddedFontFamily, BASELINE_RATIO, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
 import { nearestBaseline } from '../lib/utils/align';
+import { Lock, Unlock } from 'lucide-react';
+
+// Screen-pixel tolerance for the visual baseline guide while dragging text — tight,
+// because the line is a confirmation of exact alignment, never a magnet.
+const ALIGN_TOL = 1.5;
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 type Handle = (typeof HANDLES)[number];
@@ -29,12 +34,35 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
   const selectedId = useStore((s) => s.selectedElementId);
   const selectElement = useStore((s) => s.selectElement);
   const selected = selectedId === el.id && interactive;
+  const locked = !!el.locked;
+
+  // The lock badge flashes for 3 s whenever the element becomes (or is re-)selected,
+  // then fades — a discreet handle to lock/unlock without permanent clutter.
+  const [lockVisible, setLockVisible] = useState(false);
+  const lockTimer = useRef<number | null>(null);
+  const flashLock = () => {
+    setLockVisible(true);
+    if (lockTimer.current) window.clearTimeout(lockTimer.current);
+    lockTimer.current = window.setTimeout(() => setLockVisible(false), 3000);
+  };
+  useEffect(() => {
+    if (selected) flashLock();
+    else setLockVisible(false);
+  }, [selected]);
+  useEffect(() => () => { if (lockTimer.current) window.clearTimeout(lockTimer.current); }, []);
+
+  const toggleLock = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateElement(pageId, el.id, { locked: !locked });
+    commit();
+    flashLock();
+  };
 
   const startMove = (e: React.PointerEvent) => {
     if (!interactive || editing) return;
     // In the scan tool, clicking text re-opens its editor instead of moving it,
     // so an already-edited line can be corrected again.
-    if (editTextMode && el.type === 'text') {
+    if (editTextMode && el.type === 'text' && !locked) {
       e.stopPropagation();
       e.preventDefault(); // keep focus so the editor we open doesn't blur instantly
       selectElement(el.id);
@@ -43,6 +71,9 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     }
     e.stopPropagation();
     selectElement(el.id);
+    flashLock();
+    // A locked element is selectable (so it can be unlocked) but never moves.
+    if (locked) return;
     const startX = e.clientX;
     const startY = e.clientY;
     const origin = { x: el.x, y: el.y };
@@ -52,17 +83,13 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       const dx = (ev.clientX - startX) / scale;
       const dy = (ev.clientY - startY) / scale;
       if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
-      let y = origin.y + dy;
-      // Snap a text box vertically onto a neighbouring line's baseline so adjacent
-      // texts line up. A held Alt key bypasses the snap for free positioning.
+      const y = origin.y + dy; // free movement, no magnet
+      // Visual-only guide: light up the shared line when this text's baseline lands
+      // exactly on a neighbour's, then let it vanish as soon as you move on.
       let guide: number | null = null;
-      if (el.type === 'text' && !ev.altKey && alignBaselines && alignBaselines.length) {
+      if (el.type === 'text' && !el.rotation && alignBaselines && alignBaselines.length) {
         const size = (el as TextElement).size;
-        const snap = nearestBaseline(y + size * BASELINE_RATIO, alignBaselines, 6 / scale);
-        if (snap != null) {
-          y = snap - size * BASELINE_RATIO;
-          guide = snap;
-        }
+        guide = nearestBaseline(y + size * BASELINE_RATIO, alignBaselines, ALIGN_TOL / scale);
       }
       onAlignGuide?.(guide);
       const patch: ElementPatch = { x: origin.x + dx, y };
@@ -82,6 +109,7 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
   const startResize = (e: React.PointerEvent, h: Handle) => {
     e.stopPropagation();
     e.preventDefault();
+    if (locked) return;
     selectElement(el.id);
     const startX = e.clientX;
     const startY = e.clientY;
@@ -123,22 +151,34 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     height: el.height * scale,
     opacity: el.opacity,
     pointerEvents: interactive ? 'auto' : 'none',
+    // Free rotation pivots around the centre, matching the bake layer.
+    transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
   };
 
   return (
     <div
-      className={`el ${selected ? 'selected' : ''}`}
+      className={`el ${selected ? 'selected' : ''} ${locked ? 'locked' : ''}`}
       style={base}
       onPointerDown={startMove}
-      onDoubleClick={() => el.type === 'text' && interactive && onStartEdit()}
+      onDoubleClick={() => el.type === 'text' && interactive && !locked && onStartEdit()}
     >
       <ElementBody el={el} scale={scale} editing={editing} onEndEdit={onEndEdit} updateElement={updateElement} pageId={pageId} />
-      {selected && !editing && (
+      {selected && !editing && !locked && (
         <>
           {HANDLES.map((h) => (
             <span key={h} className={`handle ${h}`} onPointerDown={(e) => startResize(e, h)} />
           ))}
         </>
+      )}
+      {selected && !editing && lockVisible && (
+        <button
+          className={`el-lock ${locked ? 'on' : ''}`}
+          onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+          onClick={toggleLock}
+          title={locked ? 'Entsperren' : 'Sperren (vor versehentlichem Verschieben schützen)'}
+        >
+          {locked ? <Lock size={11} /> : <Unlock size={11} />}
+        </button>
       )}
     </div>
   );
@@ -199,7 +239,11 @@ function ElementBody({
             onBlur={onEndEdit}
             onPointerDown={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') {
+              // Enter finishes the field (Shift+Enter adds a line); Escape also exits.
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                e.currentTarget.blur();
+              } else if (e.key === 'Escape') {
                 e.preventDefault();
                 e.currentTarget.blur();
               }

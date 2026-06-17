@@ -41,6 +41,17 @@ export interface BaseElement {
   opacity: number;
   /** z-order within the page; higher renders on top */
   z: number;
+  /**
+   * Clockwise rotation in degrees around the element's own centre (screen space).
+   * Optional/absent means 0 (no rotation) so existing data and the engine tests
+   * stay byte-for-byte unchanged.
+   */
+  rotation?: number;
+  /**
+   * When true the element is locked: it can't be moved, resized or edited until it
+   * is unlocked again, so a finished placement can't be nudged by accident.
+   */
+  locked?: boolean;
 }
 
 export interface TextElement extends BaseElement {

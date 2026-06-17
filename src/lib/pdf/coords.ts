@@ -51,6 +51,47 @@ export function placeBox(toPdfPoint: ToPdfPoint, x: number, y: number, w: number
   return { x: bl[0], y: bl[1], width, height, rotateDeg };
 }
 
+/**
+ * Rotate a view-space point clockwise (screen convention, y points down) by
+ * `rotationDeg` around the centre `(cx, cy)`. Used so an element can carry its own
+ * free rotation on top of the page's right-angle rotation.
+ */
+export function rotateViewPoint(px: number, py: number, cx: number, cy: number, rotationDeg: number): [number, number] {
+  const rad = (rotationDeg * Math.PI) / 180;
+  const dx = px - cx;
+  const dy = py - cy;
+  return [cx + dx * Math.cos(rad) - dy * Math.sin(rad), cy + dx * Math.sin(rad) + dy * Math.cos(rad)];
+}
+
+/**
+ * Like {@link placeBox}, but for an element that also carries a free rotation
+ * (`rotationDeg`, clockwise in screen space) around its own centre. The four
+ * corners are first rotated in view space, then converted to content space, so the
+ * page's own right-angle rotation and the element's free angle compose correctly.
+ * The angle is NOT snapped to a right angle (the whole point is an arbitrary tilt).
+ */
+export function placeRotatedBox(
+  toPdfPoint: ToPdfPoint,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rotationDeg: number,
+): BoxPlacement {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const r = (px: number, py: number) => rotateViewPoint(px, py, cx, cy, rotationDeg);
+  const bl = toPdfPoint(...r(x, y + h)); // visual bottom-left (before rotation)
+  const br = toPdfPoint(...r(x + w, y + h));
+  const tl = toPdfPoint(...r(x, y));
+
+  const width = dist(bl[0], bl[1], br[0], br[1]);
+  const height = dist(bl[0], bl[1], tl[0], tl[1]);
+  const rotateDeg = (Math.atan2(br[1] - bl[1], br[0] - bl[0]) * 180) / Math.PI;
+
+  return { x: bl[0], y: bl[1], width, height, rotateDeg };
+}
+
 /** Angle (snapped degrees) of the view-space +x direction, in content space. */
 export function axisAngleDeg(toPdfPoint: ToPdfPoint, x: number, y: number): number {
   const a = toPdfPoint(x, y);

@@ -477,6 +477,7 @@
 .canvas-area.tool-ellipse .overlay,
 .canvas-area.tool-highlight .overlay,
 .canvas-area.tool-redact .overlay,
+.canvas-area.tool-cut .overlay,
 .canvas-area.tool-draw .overlay {
   cursor: crosshair;
 }
@@ -491,6 +492,46 @@
 .el.selected {
   outline: 1.5px solid var(--accent);
   outline-offset: 0;
+}
+/* A locked element reads as "pinned": dashed, muted outline and no resize grips. */
+.el.locked.selected {
+  outline-style: dashed;
+  outline-color: var(--text-3);
+}
+
+/* Discreet lock toggle, top-right of a selected element; flashes for 3 s then fades. */
+.el-lock {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text-2);
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  z-index: 7;
+  animation: lockFlash 3s var(--ease) forwards;
+}
+.el-lock:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.el-lock.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+@keyframes lockFlash {
+  0% { opacity: 0; transform: scale(0.7); }
+  9% { opacity: 1; transform: scale(1); }
+  84% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.9); }
 }
 .fill-body,
 .img-body,
@@ -1217,14 +1258,15 @@ svg.draft {
   box-shadow: inset 0 0 0 1.5px var(--accent), 0 2px 12px var(--accent-tint);
 }
 
-/* Horizontal guide a text box snaps onto, to keep adjacent texts on one line. */
+/* Horizontal guide that appears only while a text baseline sits exactly on a
+   neighbour's — a pure visual confirmation of alignment (it never snaps the box). */
 .align-guide {
   position: absolute;
   left: 0;
   right: 0;
   height: 0;
-  border-top: 1px dashed var(--accent);
-  box-shadow: 0 0 0 0.5px var(--accent-ring);
+  border-top: 1px solid var(--accent);
+  box-shadow: 0 0 5px 0.5px var(--accent);
   pointer-events: none;
   z-index: 6;
 }

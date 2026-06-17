@@ -7,7 +7,7 @@
  * the whole point of the "no quality loss" requirement.
  */
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
-import { makeToPdfPoint, placeBox } from '../src/lib/pdf/coords.ts';
+import { makeToPdfPoint, placeBox, placeRotatedBox } from '../src/lib/pdf/coords.ts';
 import { exportInPlace, exportRebuild, isIdentityArrangement, BLANK_SOURCE, type ExportPageSpec } from '../src/lib/pdf/pages.ts';
 import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf, matchCatalogFontKey } from '../src/lib/pdf/fontCatalog.ts';
 import { classifyFont, prettyFontName } from '../src/lib/pdf/fonts.ts';
@@ -112,6 +112,15 @@ async function run(): Promise<void> {
 
     const box90 = placeBox(r90, 50, 50, 200, 30);
     ok('placeBox rot90 width/height preserved', approx(box90.width, 200) && approx(box90.height, 30) && box90.rotateDeg === 90);
+
+    // Free element rotation composes on top of the page's right angle.
+    const rb0 = placeRotatedBox(r0, 50, 50, 200, 30, 0);
+    ok('placeRotatedBox(0°) equals placeBox', approx(rb0.x, 50) && approx(rb0.y, 520) && approx(rb0.width, 200) && approx(rb0.height, 30) && approx(rb0.rotateDeg, 0));
+    const rb90 = placeRotatedBox(r0, 50, 50, 200, 30, 90);
+    // A clockwise screen rotation is CCW in content space (y is flipped on export).
+    ok('placeRotatedBox(90°) tilts to -90° in content space', approx(rb90.rotateDeg, -90) && approx(rb90.width, 200) && approx(rb90.height, 30));
+    const rb45 = placeRotatedBox(r0, 50, 50, 200, 30, 45);
+    ok('placeRotatedBox keeps side lengths under tilt', approx(rb45.width, 200) && approx(rb45.height, 30) && approx(rb45.rotateDeg, -45));
   }
 
   // ── font catalogue + original-font capture ──
@@ -253,6 +262,22 @@ async function run(): Promise<void> {
     ok('page rotation is 90', reread.getPage(0).getRotation().angle === 90);
     const text = await extractText(out);
     ok('text still present after rotation', text[0].includes('ALPHA') && text[0].includes('ROT'));
+  }
+
+  // ── free element rotation bakes without throwing and keeps text ──
+  console.log('\nfree rotation (per-element)');
+  {
+    const fresh = await PDFDocument.load(await makeSamplePdf(['ALPHA']));
+    const els: AnyElement[] = [
+      textEl({ id: 'rt', text: 'TILTED', x: 60, y: 200, rotation: 30 } as Partial<AnyElement>),
+      { id: 'rr', type: 'rect', x: 200, y: 200, width: 80, height: 40, opacity: 1, z: 2, fill: '#3366ff', stroke: null, strokeWidth: 0, radius: 0, rotation: -20 } as AnyElement,
+      { id: 'rk', type: 'ink', x: 40, y: 360, width: 100, height: 50, opacity: 1, z: 3, points: [{ x: 40, y: 360 }, { x: 140, y: 410 }], color: '#cc0033', strokeWidth: 3, rotation: 15 } as AnyElement,
+    ];
+    const out = await exportInPlace(fresh, [{ sourceKey: 'main', sourceIndex: 0, addedRotation: 0, elements: els }], {});
+    const reread = await PDFDocument.load(out);
+    ok('rotated elements still load', reread.getPageCount() === 1);
+    const text = await extractText(out);
+    ok('rotated text baked + original intact', text[0].includes('TILTED') && text[0].includes('ALPHA'));
   }
 
   // ── every element type bakes without throwing and stays loadable ──

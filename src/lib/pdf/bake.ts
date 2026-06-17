@@ -12,7 +12,7 @@ import type { AnyElement, TextElement, RectElement, EllipseElement, HighlightEle
 import { standardFontFor, BASELINE_RATIO } from './fonts';
 import { baseFamilyOf, fontFileUrl } from './fontCatalog';
 import { getEmbeddedFont } from './embeddedFonts';
-import { placeBox, axisAngleDeg, type ToPdfPoint } from './coords';
+import { placeBox, placeRotatedBox, rotateViewPoint, axisAngleDeg, type ToPdfPoint, type BoxPlacement } from './coords';
 
 /** Where the baseline sits below a line's top, as a fraction of the font size. */
 const ASCENT_RATIO = BASELINE_RATIO;
@@ -171,8 +171,19 @@ export class Baker {
     }
   }
 
+  /**
+   * Place an element's box, honouring its free rotation when present. With no
+   * rotation this is exactly {@link placeBox} (snapped right angle) so unrotated
+   * exports stay identical; with a rotation it composes the free angle on top.
+   */
+  private placeEl(el: { x: number; y: number; width: number; height: number; rotation?: number }, toPdfPoint: ToPdfPoint): BoxPlacement {
+    return el.rotation
+      ? placeRotatedBox(toPdfPoint, el.x, el.y, el.width, el.height, el.rotation)
+      : placeBox(toPdfPoint, el.x, el.y, el.width, el.height);
+  }
+
   private drawRect(page: PDFPage, el: RectElement, toPdfPoint: ToPdfPoint): void {
-    const p = placeBox(toPdfPoint, el.x, el.y, el.width, el.height);
+    const p = this.placeEl(el, toPdfPoint);
     page.drawRectangle({
       x: p.x,
       y: p.y,
@@ -188,7 +199,7 @@ export class Baker {
   }
 
   private drawHighlight(page: PDFPage, el: HighlightElement, toPdfPoint: ToPdfPoint): void {
-    const p = placeBox(toPdfPoint, el.x, el.y, el.width, el.height);
+    const p = this.placeEl(el, toPdfPoint);
     page.drawRectangle({
       x: p.x,
       y: p.y,
@@ -201,7 +212,8 @@ export class Baker {
   }
 
   private drawEllipse(page: PDFPage, el: EllipseElement, toPdfPoint: ToPdfPoint): void {
-    const p = placeBox(toPdfPoint, el.x, el.y, el.width, el.height);
+    const p = this.placeEl(el, toPdfPoint);
+    // The centre is the rotation pivot, so a free rotation never moves it.
     const [cx, cy] = toPdfPoint(el.x + el.width / 2, el.y + el.height / 2);
     page.drawEllipse({
       x: cx,
@@ -220,7 +232,7 @@ export class Baker {
   private async drawImage(page: PDFPage, el: ImageElement, toPdfPoint: ToPdfPoint): Promise<void> {
     const img = await this.image(el.src);
     if (!img) return;
-    const p = placeBox(toPdfPoint, el.x, el.y, el.width, el.height);
+    const p = this.placeEl(el, toPdfPoint);
     page.drawImage(img, {
       x: p.x,
       y: p.y,
@@ -234,9 +246,14 @@ export class Baker {
   private drawInk(page: PDFPage, el: InkElement, toPdfPoint: ToPdfPoint): void {
     if (el.points.length < 2) return;
     const color = rgbColor(el.color);
+    const rot = el.rotation ?? 0;
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    const conv = (p: { x: number; y: number }) =>
+      rot ? toPdfPoint(...rotateViewPoint(p.x, p.y, cx, cy, rot)) : toPdfPoint(p.x, p.y);
     for (let i = 1; i < el.points.length; i++) {
-      const a = toPdfPoint(el.points[i - 1].x, el.points[i - 1].y);
-      const b = toPdfPoint(el.points[i].x, el.points[i].y);
+      const a = conv(el.points[i - 1]);
+      const b = conv(el.points[i]);
       page.drawLine({
         start: { x: a[0], y: a[1] },
         end: { x: b[0], y: b[1] },
@@ -251,7 +268,7 @@ export class Baker {
   private async drawText(page: PDFPage, el: TextElement, toPdfPoint: ToPdfPoint): Promise<void> {
     // 1) Hide the original glyphs when this edit replaces existing PDF text.
     if (el.coverColor) {
-      const cover = placeBox(toPdfPoint, el.x, el.y, el.width, el.height);
+      const cover = this.placeEl(el, toPdfPoint);
       page.drawRectangle({
         x: cover.x,
         y: cover.y,
@@ -273,6 +290,11 @@ export class Baker {
     const color = rgbColor(el.color);
     const lines = el.text.length ? el.text.split('\n') : [''];
 
+    // Free rotation (clockwise on screen) pivots around the element's centre.
+    const rot = el.rotation ?? 0;
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (!line) continue;
@@ -280,8 +302,19 @@ export class Baker {
       const lineTop = el.y + i * el.size * el.lineHeight;
       const baselineY = lineTop + el.size * ASCENT_RATIO;
       const x0 = lineX(el, line, unicodeFont ?? stdFont);
-      const anchor = toPdfPoint(x0, baselineY);
-      const rotateDeg = axisAngleDeg(toPdfPoint, x0, baselineY);
+      let anchor: [number, number];
+      let rotateDeg: number;
+      if (rot) {
+        // Rotate the baseline's start (and a unit step along it) in view space,
+        // then read the content-space angle straight off the converted points so
+        // the page rotation and the free angle compose without special cases.
+        anchor = toPdfPoint(...rotateViewPoint(x0, baselineY, cx, cy, rot));
+        const next = toPdfPoint(...rotateViewPoint(x0 + 1, baselineY, cx, cy, rot));
+        rotateDeg = (Math.atan2(next[1] - anchor[1], next[0] - anchor[0]) * 180) / Math.PI;
+      } else {
+        anchor = toPdfPoint(x0, baselineY);
+        rotateDeg = axisAngleDeg(toPdfPoint, x0, baselineY);
+      }
 
       const draw = (font: PDFFont, text: string) =>
         page.drawText(text, {

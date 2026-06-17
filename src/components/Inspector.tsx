@@ -2,7 +2,7 @@ import { useStore } from '../state/store';
 import type { AnyElement, ElementPatch, TextElement } from '../lib/pdf';
 import { FontPicker } from './FontPicker';
 import { ColorPicker } from './ColorPicker';
-import { Bold, Italic, AlignLeft, AlignCenter, AlignRight, Copy, BringToFront, SendToBack, Trash2, Type } from 'lucide-react';
+import { Bold, Italic, AlignLeft, AlignCenter, AlignRight, Copy, BringToFront, SendToBack, Trash2, Type, RotateCw, Lock, Unlock } from 'lucide-react';
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -47,27 +47,6 @@ export function Inspector() {
 
       {el && (
         <>
-          <Group title="Position & Grösse">
-            <Row>
-              <label>X</label>
-              <input className="field" type="number" value={Math.round(el.x)} onChange={(e) => set({ x: Number(e.target.value) }, false)} onBlur={commit} />
-              <label>Y</label>
-              <input className="field" type="number" value={Math.round(el.y)} onChange={(e) => set({ y: Number(e.target.value) }, false)} onBlur={commit} />
-            </Row>
-            <Row>
-              <label>B</label>
-              <input className="field" type="number" value={Math.round(el.width)} onChange={(e) => set({ width: Number(e.target.value) }, false)} onBlur={commit} />
-              <label>H</label>
-              <input className="field" type="number" value={Math.round(el.height)} onChange={(e) => set({ height: Number(e.target.value) }, false)} onBlur={commit} />
-            </Row>
-            <Row>
-              <label>Deckkraft</label>
-              <input type="range" min={10} max={100} value={Math.round(el.opacity * 100)} onChange={(e) => set({ opacity: Number(e.target.value) / 100 }, false)} onMouseUp={commit} />
-              <span className="insp-val">{Math.round(el.opacity * 100)}%</span>
-            </Row>
-            <p className="insp-hint">Pfeiltasten verschieben um 1 pt (Shift: 10 pt). Text rastet auf der Nachbar-Grundlinie ein.</p>
-          </Group>
-
           {el.type === 'text' && <TextProps el={el} set={set} />}
           {el.type === 'rect' && <ShapeProps el={el} set={set} radius />}
           {el.type === 'ellipse' && <ShapeProps el={el} set={set} />}
@@ -90,8 +69,41 @@ export function Inspector() {
             </Group>
           )}
 
+          <Group title="Drehung">
+            <Row>
+              <RotateCw size={15} />
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                step={1}
+                value={Math.round(el.rotation ?? 0)}
+                onChange={(e) => set({ rotation: Number(e.target.value) }, false)}
+                onMouseUp={commit}
+                onTouchEnd={commit}
+              />
+              <span className="insp-val">{Math.round(el.rotation ?? 0)}°</span>
+            </Row>
+            <Row>
+              <input
+                className="field field-sm"
+                type="number"
+                min={-180}
+                max={180}
+                value={Math.round(el.rotation ?? 0)}
+                onChange={(e) => set({ rotation: Number(e.target.value) })}
+              />
+              <button className="btn ghost" onClick={() => set({ rotation: 0 })}>
+                Zurücksetzen
+              </button>
+            </Row>
+          </Group>
+
           <Group title="Aktionen">
             <div className="insp-actions">
+              <button className="btn ghost" onClick={() => set({ locked: !el.locked })}>
+                {el.locked ? <Unlock size={15} /> : <Lock size={15} />} {el.locked ? 'Entsperren' : 'Sperren'}
+              </button>
               <button className="btn ghost" onClick={() => page && duplicateElement(page.id, el.id)}>
                 <Copy size={15} /> Duplizieren
               </button>
@@ -170,6 +182,19 @@ export function Inspector() {
         </Group>
       );
     }
+    if (activeTool === 'cut') {
+      return (
+        <Group title="Ausschneiden">
+          <p className="insp-hint">
+            Ziehe ein Rechteck auf: der Bereich wird ausgeschnitten und als frei
+            verschiebbares Stück eingefügt (direkt angewählt). Die ursprüngliche Stelle
+            wird mit ihrer eigenen Hintergrundfarbe abgedeckt. Das Stück lässt sich wie
+            jedes Element verschieben, <strong>duplizieren</strong> (⌘/Strg + D) und
+            <strong> kopieren</strong> (⌘/Strg + C · V).
+          </p>
+        </Group>
+      );
+    }
     if (activeTool === 'brush') {
       return (
         <Group title="Hintergrund-Pinsel">
@@ -221,8 +246,9 @@ export function Inspector() {
             derselben Schrift an.
           </p>
           <p className="insp-hint">
-            Tipp: Mit den Pfeiltasten verschiebst du ein Feld pixelgenau; beim Bewegen
-            rastet es auf der Grundlinie der Nachbarzeile ein (Alt hält frei).
+            Tipp: Mit den Pfeiltasten verschiebst du ein Feld Pixel für Pixel. Liegt die
+            Grundlinie der Buchstaben exakt auf einer Nachbarzeile, erscheint kurz eine
+            Hilfslinie als Sichthilfe – ohne Magnet-Effekt.
           </p>
         </Group>
       );

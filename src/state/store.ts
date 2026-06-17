@@ -17,6 +17,7 @@ export type ToolId =
   | 'select'
   | 'edit-text'
   | 'text'
+  | 'cut'
   | 'brush'
   | 'highlight'
   | 'draw'
@@ -25,6 +26,10 @@ export type ToolId =
   | 'redact'
   | 'image'
   | 'signature';
+
+/** Highest magnification, mirrored by the clamp in PageCanvas. 2000 %. */
+export const MAX_ZOOM = 20;
+export const MIN_ZOOM = 0.25;
 
 export interface EditorPage {
   id: string;
@@ -86,6 +91,8 @@ interface StoreState {
   /** Recently used / sampled colours, newest first — shared by every colour picker
    *  so a tone picked with the brush (or eyedropper) is reusable in new text. */
   recentColors: string[];
+  /** A single copied element kept for paste (Cmd/Ctrl+C → V), across pages. */
+  clipboard: AnyElement | null;
 
   past: Snapshot[];
   future: Snapshot[];
@@ -109,10 +116,16 @@ interface StoreState {
 
   // ── elements ──
   addElement: (pageId: string, el: AnyElement) => void;
+  /** Add several elements in ONE history step; selects `selectId` (else the last). */
+  addElements: (pageId: string, els: AnyElement[], selectId?: string) => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   deleteElement: (pageId: string, id: string) => void;
   duplicateElement: (pageId: string, id: string) => void;
   reorderElement: (pageId: string, id: string, dir: 'front' | 'back') => void;
+  /** Copy the selected element to the in-app clipboard (no history change). */
+  copyElement: (pageId: string, id: string) => void;
+  /** Paste the clipboard element onto a page (slightly offset, selected). */
+  pasteElement: (pageId: string) => void;
 
   // ── pages ──
   reorderPages: (fromIndex: number, toIndex: number) => void;
@@ -190,6 +203,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   tool: { ...DEFAULT_TOOL },
   recentColors: [],
+  clipboard: null,
 
   past: [],
   future: [],
@@ -302,9 +316,9 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ activeTool: tool, selectedElementId: tool === 'select' ? get().selectedElementId : null });
   },
   setZoom(zoom) {
-    // Up to 1000 % magnification (MIN 25 %). The page bitmap is resolution-capped
+    // Up to 2000 % magnification (MIN 25 %). The page bitmap is resolution-capped
     // in PageCanvas, so an extreme zoom stays visible instead of blanking out.
-    set({ zoom: Math.max(0.25, Math.min(10, Number(zoom.toFixed(2)))) });
+    set({ zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number(zoom.toFixed(2)))) });
   },
   setCurrentPage(id) {
     set({ currentPageId: id, selectedElementId: null });
@@ -327,6 +341,14 @@ export const useStore = create<StoreState>((set, get) => ({
       selectedElementId: el.id,
     }));
   },
+  addElements(pageId, els, selectId) {
+    if (!els.length) return;
+    get().commit();
+    set((s) => ({
+      pages: s.pages.map((p) => (p.id === pageId ? { ...p, elements: [...p.elements, ...els] } : p)),
+      selectedElementId: selectId ?? els[els.length - 1].id,
+    }));
+  },
   updateElement(pageId, id, patch) {
     set((s) => ({
       pages: s.pages.map((p) =>
@@ -347,7 +369,21 @@ export const useStore = create<StoreState>((set, get) => ({
     const page = get().pages.find((p) => p.id === pageId);
     const el = page?.elements.find((e) => e.id === id);
     if (!el) return;
-    const copy = { ...structuredClone(el), id: uid('el'), x: el.x + 12, y: el.y + 12, z: maxZ(page!.elements) + 1 };
+    // A duplicate is always free to move, even if the original was locked.
+    const copy = { ...structuredClone(el), id: uid('el'), x: el.x + 12, y: el.y + 12, z: maxZ(page!.elements) + 1, locked: false };
+    get().addElement(pageId, copy);
+  },
+  copyElement(pageId, id) {
+    const page = get().pages.find((p) => p.id === pageId);
+    const el = page?.elements.find((e) => e.id === id);
+    if (el) set({ clipboard: structuredClone(el) });
+  },
+  pasteElement(pageId) {
+    const { clipboard } = get();
+    if (!clipboard) return;
+    const page = get().pages.find((p) => p.id === pageId);
+    if (!page) return;
+    const copy = { ...structuredClone(clipboard), id: uid('el'), x: clipboard.x + 14, y: clipboard.y + 14, z: maxZ(page.elements) + 1, locked: false };
     get().addElement(pageId, copy);
   },
   reorderElement(pageId, id, dir) {

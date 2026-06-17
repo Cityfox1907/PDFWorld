@@ -26,10 +26,11 @@ die bestehenden Seiten eingezeichnet.
   Generische Namen wie „sans-serif“ werden korrekt der richtigen Familie zugeordnet
   und bekannte Schriften (Arial, Times New Roman, Roboto …) exakt benannt – so
   stimmen angezeigter Name und tatsächlich genutzte Schrift immer überein. Mit
-  **„In dieser Schrift schreiben“** wird ein leeres Textfeld in **exakt dieser
-  Schrift** angelegt – gleiche Grösse, gleicher Stil (**Fett/Kursiv** bleiben erhalten)
-  und gleiche Farbe, **ohne Hintergrund-Abdeckung**, sodass das Original darunter
-  unangetastet bleibt
+  **„In dieser Schrift schreiben“** wird die Schrift **übernommen** – der **nächste
+  Klick auf die Seite** setzt dort ein leeres Textfeld in **exakt dieser Schrift**
+  (gleiche Grösse, gleicher Stil mit **Fett/Kursiv**, gleiche Farbe), **ohne
+  Hintergrund-Abdeckung**, sodass das Original darunter unangetastet bleibt. So
+  wählst du frei, **wohin** der Text kommt, statt ihn fest auf die Zeile zu setzen
 - **Pixelgenaue Ausrichtung** – ausgewählte Felder lassen sich mit den **Pfeiltasten**
   Pixel für Pixel verschieben (1 px, mit Shift 10 px – unabhängig vom Zoom). Fluchtet
   die **Grundlinie der Buchstaben** exakt mit einer Nachbarzeile, erscheint kurz eine
@@ -65,11 +66,24 @@ die bestehenden Seiten eingezeichnet.
 - **Markieren** – als **Rechteck** über eine Textzeile oder als **Textmarker-Stift**
   mit ovaler Spitze frei über den Text gezeichnet (echter Multiply-Blend, damit der
   Text darunter lesbar bleibt)
-- **Freihändig zeichnen**, **Rechtecke/Ellipsen**, **Bereiche schwärzen**
+- **Freihändig zeichnen** – ein vollwertiges Zeichen-Werkzeug mit **Stift** oder
+  **Marker** (durchscheinender Multiply-Strich), frei wählbarer **Farbe**, **Stärke**
+  (bis 24 pt), **Deckkraft** und **Linienstil** (durchgezogen · gestrichelt · gepunktet),
+  mit **Live-Vorschau** des Strichs. Jede Eigenschaft lässt sich später am ausgewählten
+  Strich weiter anpassen
+- **Rechtecke/Ellipsen**, **Bereiche schwärzen**
+- **Elemente-Übersicht** – ein Symbol links öffnet eine **Ebenen-Ansicht** aller
+  Bearbeitungen: eine **Mini-Karte der Seite** (das **PDF mit Markern** über jedem
+  Element, vergrösserbar) plus eine nach Seiten gruppierte Liste. Elemente lassen sich
+  von dort **anwählen**, **ein-/ausblenden** (das Auge) und **löschen** – so behältst du
+  auch bei vielen Einfügungen den Überblick. Bei geöffneter Übersicht werden alle
+  Elemente zusätzlich dezent auf der Seite umrandet
 
 ### 3. Oberfläche
 - **Helles & dunkles Design** (umschaltbar, merkt sich die Wahl)
-- **Zoom bis 2000 %** – per Lupen-Buttons oder ⌘/Strg + Mausrad (Trackpad-Pinch)
+- **Zoom bis 2000 %** – per Lupen-Buttons (zoomt auf die **Mitte des sichtbaren
+  Fensters**) oder ⌘/Strg + Mausrad bzw. Trackpad-Pinch (zoomt **genau dort, wo der
+  Cursor steht**) – das Dokument bleibt beim Zoomen an Ort und Stelle
 - **Speichern-Dialog** – Dateiname ändern und Zielordner wählen, bevor gespeichert wird
   (nativer Speicherort-Dialog, wo der Browser ihn unterstützt)
 - Tastaturkürzel für jedes Werkzeug, Undo/Redo, Speichern

@@ -17,6 +17,7 @@ import {
   Eraser,
   ImagePlus,
   PenTool,
+  Layers,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -47,6 +48,8 @@ export function ToolRail() {
   const pages = useStore((s) => s.pages);
   const currentPageId = useStore((s) => s.currentPageId);
   const openSignature = useUI((s) => s.openSignature);
+  const elementsPanelOpen = useUI((s) => s.elementsPanelOpen);
+  const toggleElementsPanel = useUI((s) => s.toggleElementsPanel);
   const imgRef = useRef<HTMLInputElement>(null);
 
   const placeImage = (file: File) => {
@@ -108,6 +111,17 @@ export function ToolRail() {
       <button className="rail-btn" onClick={openSignature} title="Unterschrift">
         <PenTool size={19} />
         <span className="rail-tip">Unterschrift</span>
+      </button>
+
+      <div className="rail-spacer" />
+
+      <button
+        className={`rail-btn ${elementsPanelOpen ? 'active' : ''}`}
+        onClick={toggleElementsPanel}
+        title="Elemente-Übersicht (alle Bearbeitungen)"
+      >
+        <Layers size={19} />
+        <span className="rail-tip">Elemente-Übersicht</span>
       </button>
 
       <input

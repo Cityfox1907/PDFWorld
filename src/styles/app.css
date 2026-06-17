@@ -317,6 +317,10 @@
   background: var(--line);
   margin: 5px 0;
 }
+/* Pushes the trailing rail buttons (the Elements overview toggle) to the bottom. */
+.rail-spacer {
+  flex: 1;
+}
 
 /* ── PAGE SIDEBAR ── */
 .sidebar {
@@ -565,8 +569,9 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  white-space: pre-wrap;
-  word-break: break-word;
+  /* No wrapping: the box auto-fits each line's width, so what you see on screen is what
+     the export draws (the bake layer never wraps either). */
+  white-space: pre;
 }
 .text-placeholder {
   color: var(--text-3);
@@ -706,6 +711,203 @@ svg.draft {
   }
 }
 
+/* ── ELEMENTS / LAYERS PANEL (left) ───────────────────────────────────────────
+   A Word-like overview of every edit on the document: a live page mini-map with a
+   marker over each element, plus a grouped, clickable list. Toggled from the rail. */
+.layers {
+  width: 250px;
+  flex-shrink: 0;
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  transition: width 0.2s var(--ease);
+  animation: pop 0.2s var(--ease);
+}
+.layers.wide {
+  width: 392px;
+}
+.layers-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 10px 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.layers-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.layers-title svg {
+  color: var(--accent);
+}
+.layers-map-wrap {
+  flex-shrink: 0;
+  padding: 12px 14px 6px;
+}
+.layers-map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.minimap {
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
+}
+.minimap-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.minimap-markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.minimap-mark {
+  position: absolute;
+  min-width: 5px;
+  min-height: 5px;
+  padding: 0;
+  border-radius: 3px;
+  pointer-events: auto;
+  cursor: pointer;
+  border: 1.5px solid var(--mark-tint, var(--accent));
+  background: color-mix(in srgb, var(--mark-tint, var(--accent)) 18%, transparent);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5);
+  transition: background 0.12s, box-shadow 0.12s, transform 0.1s var(--ease);
+}
+.minimap-mark:hover {
+  background: color-mix(in srgb, var(--mark-tint, var(--accent)) 34%, transparent);
+}
+.minimap-mark.active {
+  background: color-mix(in srgb, var(--mark-tint, var(--accent)) 42%, transparent);
+  box-shadow: 0 0 0 2px var(--mark-tint, var(--accent)), 0 2px 8px rgba(0, 0, 0, 0.25);
+  z-index: 2;
+}
+.minimap-mark.hidden {
+  border-style: dashed;
+  opacity: 0.5;
+}
+.layers-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 8px 14px;
+}
+.layers-empty {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+  padding: 14px 8px;
+}
+.layer-group + .layer-group {
+  margin-top: 6px;
+}
+.layer-group-head {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
+  padding: 8px 8px 4px;
+}
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.layer-row:hover {
+  background: var(--bg-elevated);
+}
+.layer-row.active {
+  background: var(--accent-tint);
+}
+.layer-row.is-hidden .layer-label,
+.layer-row.is-hidden .layer-icon {
+  opacity: 0.45;
+}
+.layer-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+.layer-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layer-num {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.layer-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.layer-row:hover .layer-actions,
+.layer-row.active .layer-actions {
+  opacity: 1;
+}
+.layer-actions button {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+.layer-actions button:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--text);
+}
+.layer-actions button.danger:hover {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--danger);
+}
+
+/* Reveal mode: while the Elements panel is open, every edit gets a faint outline on
+   the page so the whole structure is visible at a glance (like Word's marks). */
+.overlay.reveal .el::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  outline: 1px dashed var(--accent-ring);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
 /* ── INSPECTOR ── */
 .inspector {
   width: 286px;
@@ -713,7 +915,75 @@ svg.draft {
   background: var(--panel);
   border-left: 1px solid var(--line);
   overflow-y: auto;
-  padding: 16px;
+  padding: 0 16px 16px;
+}
+/* Sticky context header with a tucked-away info toggle (replaces the old hint walls). */
+.insp-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  padding: 14px 0 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.insp-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.insp-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.insp-head-title svg {
+  color: var(--accent);
+}
+.insp-info {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  transition: color 0.14s, background 0.14s;
+}
+.insp-info:hover,
+.insp-info.on {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.insp-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  animation: pop 0.16s var(--ease);
+}
+.insp-note {
+  font-size: 11.5px;
+  color: var(--success);
+  margin: -2px 0 8px;
+}
+/* Live preview of the current pen/marker stroke. */
+.stroke-preview {
+  margin-top: 4px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 4px 6px;
+}
+.stroke-preview svg {
+  display: block;
 }
 .insp-group {
   margin-bottom: 18px;

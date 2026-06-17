@@ -52,6 +52,12 @@ export interface BaseElement {
    * is unlocked again, so a finished placement can't be nudged by accident.
    */
   locked?: boolean;
+  /**
+   * When true the element is hidden: it isn't rendered on the canvas and is skipped
+   * on export. Toggled from the Elements/Layers panel so a stack of edits can be
+   * hidden to declutter the page without deleting anything.
+   */
+  hidden?: boolean;
 }
 
 export interface TextElement extends BaseElement {
@@ -121,6 +127,11 @@ export interface InkElement extends BaseElement {
    * ink line (the pen/draw tool or the background brush).
    */
   highlight?: boolean;
+  /**
+   * Stroke style for the drawing tool. 'solid' (or absent) is a continuous line;
+   * 'dashed' and 'dotted' render a patterned stroke both on screen and on export.
+   */
+  dash?: 'solid' | 'dashed' | 'dotted';
 }
 
 export type AnyElement =

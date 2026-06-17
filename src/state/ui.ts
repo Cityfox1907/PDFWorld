@@ -23,6 +23,8 @@ interface UIState {
   sidebarOpen: boolean;
   /** full-window page organiser for arranging many pages at once */
   organizerOpen: boolean;
+  /** the layers/elements overview panel on the left (overview of every edit) */
+  elementsPanelOpen: boolean;
   /** save dialog (rename + choose destination) before exporting */
   saveDialogOpen: boolean;
   /** thumbnail magnification in the page overview (1 = compact … 3 = read the text) */
@@ -33,6 +35,8 @@ interface UIState {
   toggleSidebar: () => void;
   toggleOrganizer: () => void;
   setOrganizer: (open: boolean) => void;
+  toggleElementsPanel: () => void;
+  setElementsPanel: (open: boolean) => void;
   openSaveDialog: () => void;
   closeSaveDialog: () => void;
   setThumbZoom: (z: number) => void;
@@ -43,6 +47,7 @@ export const useUI = create<UIState>((set) => ({
   signatureOpen: false,
   sidebarOpen: true,
   organizerOpen: false,
+  elementsPanelOpen: false,
   saveDialogOpen: false,
   thumbZoom: 1,
   theme: readTheme(),
@@ -51,6 +56,8 @@ export const useUI = create<UIState>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   toggleOrganizer: () => set((s) => ({ organizerOpen: !s.organizerOpen })),
   setOrganizer: (open) => set({ organizerOpen: open }),
+  toggleElementsPanel: () => set((s) => ({ elementsPanelOpen: !s.elementsPanelOpen })),
+  setElementsPanel: (open) => set({ elementsPanelOpen: open }),
   openSaveDialog: () => set({ saveDialogOpen: true }),
   closeSaveDialog: () => set({ saveDialogOpen: false }),
   setThumbZoom: (z) => set({ thumbZoom: Math.max(1, Math.min(3, Number(z.toFixed(2)))) }),

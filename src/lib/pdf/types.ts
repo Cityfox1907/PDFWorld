@@ -114,6 +114,13 @@ export interface InkElement extends BaseElement {
   points: { x: number; y: number }[];
   color: string;
   strokeWidth: number;
+  /**
+   * When true this freehand stroke is a *highlighter* (the marker tool's pen mode):
+   * it is drawn semi-transparent with a Multiply blend so the text underneath stays
+   * readable, exactly like a real highlighter. Absent/false means a normal opaque
+   * ink line (the pen/draw tool or the background brush).
+   */
+  highlight?: boolean;
 }
 
 export type AnyElement =

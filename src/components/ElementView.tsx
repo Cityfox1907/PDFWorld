@@ -291,7 +291,13 @@ function ElementBody({
     case 'ink': {
       const d = el.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x - el.x) * scale} ${(p.y - el.y) * scale}`).join(' ');
       return (
-        <svg className="ink-body" width={el.width * scale} height={el.height * scale}>
+        <svg
+          className="ink-body"
+          width={el.width * scale}
+          height={el.height * scale}
+          // Highlighter strokes blend like a real marker so text underneath stays legible.
+          style={el.highlight ? { mixBlendMode: 'multiply' } : undefined}
+        >
           <path d={d} fill="none" stroke={el.color} strokeWidth={el.strokeWidth * scale} strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );

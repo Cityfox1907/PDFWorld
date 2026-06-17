@@ -51,10 +51,16 @@ export interface ToolDefaults {
   textFamily: FontFamilyKey;
   textSize: number;
   highlightColor: string;
+  /** marker tool shape: a dragged rectangle, or a freehand highlighter pen */
+  highlightMode: 'rect' | 'brush';
+  /** width of the highlighter pen stroke, in view points */
+  highlightWidth: number;
   drawColor: string;
   drawWidth: number;
   shapeFill: string;
   shapeStroke: string;
+  /** background brush shape: a freehand stroke, or a borderless filled rectangle */
+  brushMode: 'brush' | 'rect';
   /** width of the background cover brush, in view points */
   brushWidth: number;
   /** last colour the brush sampled from the page (for the inspector preview) */
@@ -155,10 +161,13 @@ const DEFAULT_TOOL: ToolDefaults = {
   textFamily: 'arial',
   textSize: 9,
   highlightColor: '#ffd84d',
+  highlightMode: 'rect',
+  highlightWidth: 16,
   drawColor: '#1a1a1a',
   drawWidth: 2.5,
   shapeFill: '#ffffff',
   shapeStroke: '#111111',
+  brushMode: 'brush',
   brushWidth: 18,
   brushColor: '#ffffff',
 };

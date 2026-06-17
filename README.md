@@ -26,9 +26,10 @@ die bestehenden Seiten eingezeichnet.
   Generische Namen wie „sans-serif“ werden korrekt der richtigen Familie zugeordnet
   und bekannte Schriften (Arial, Times New Roman, Roboto …) exakt benannt – so
   stimmen angezeigter Name und tatsächlich genutzte Schrift immer überein. Mit
-  **„Originalschrift übernehmen“** wird die Zeile in exakt dieser Schrift ersetzt,
-  mit **„Neues Feld darunter · 9 pt“** ein leeres Feld in derselben Schrift direkt
-  unter der Zeile angelegt
+  **„In dieser Schrift schreiben“** wird ein leeres Textfeld in **exakt dieser
+  Schrift** angelegt – gleiche Grösse, gleicher Stil (**Fett/Kursiv** bleiben erhalten)
+  und gleiche Farbe, **ohne Hintergrund-Abdeckung**, sodass das Original darunter
+  unangetastet bleibt
 - **Pixelgenaue Ausrichtung** – ausgewählte Felder lassen sich mit den **Pfeiltasten**
   Pixel für Pixel verschieben (1 px, mit Shift 10 px – unabhängig vom Zoom). Fluchtet
   die **Grundlinie der Buchstaben** exakt mit einer Nachbarzeile, erscheint kurz eine
@@ -36,17 +37,21 @@ die bestehenden Seiten eingezeichnet.
   ein Magnet
 - **Drehen** – jedes Element (Textfeld, Form, Bild …) lässt sich per Regler frei
   drehen; die Drehung wird verlustfrei exakt so in die Seite gezeichnet
-- **Ausschneiden** – einen rechteckigen Bereich aufziehen: er wird als frei
-  verschiebbares Stück herausgelöst (sofort angewählt), die Stelle dahinter mit ihrer
-  eigenen Hintergrundfarbe abgedeckt. Stücke lassen sich verschieben, **duplizieren**
+- **Bereich duplizieren** – einen rechteckigen Bereich aufziehen: er wird in **voller
+  Originalqualität (1:1)** dupliziert und als frei verschiebbares Stück eingefügt
+  (sofort angewählt). Der Bereich wird dafür direkt aus dem PDF in Druckdichte
+  neu gerastert – **das Original bleibt vollständig erhalten**, nichts wird
+  herausgeschnitten oder überdeckt. Stücke lassen sich verschieben, **duplizieren**
   (⌘/Strg + D) und **kopieren/einfügen** (⌘/Strg + C · V)
 - **Sperren** – ein Element gegen versehentliches Verschieben sichern; ein dezentes
   Schloss-Symbol oben rechts erscheint kurz beim Anwählen zum Ent-/Sperren
 - **Direkt tippen** – ein neues Textfeld landet genau auf der angeklickten Linie und
   ist sofort beschreibbar; **Enter** schliesst ab, **Shift + Enter** macht einen Umbruch
 - **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
-  Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied. Die aufgenommene
-  Farbe wandert in die **Farbauswahl** und lässt sich per Klick als Schriftfarbe
+  Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied. Wahlweise als
+  **freier Pinselstrich** oder als **randloses Rechteck** (ein Aufziehen füllt den
+  Block direkt mit der aufgenommenen Hintergrundfarbe). Die aufgenommene Farbe
+  wandert in die **Farbauswahl** und lässt sich per Klick als Schriftfarbe
   weiterverwenden
 - **Neuen Text** hinzufügen – Standard **Grösse 9** und **Schwarz**, Auswahl aus
   einem Font-Picker mit **~90 Schriften**, der jeden Namen in seiner eigenen Schrift
@@ -57,7 +62,10 @@ die bestehenden Seiten eingezeichnet.
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
 - **Bilder** platzieren
-- **Markieren**, **freihändig zeichnen**, **Rechtecke/Ellipsen**, **Bereiche schwärzen**
+- **Markieren** – als **Rechteck** über eine Textzeile oder als **Textmarker-Stift**
+  mit ovaler Spitze frei über den Text gezeichnet (echter Multiply-Blend, damit der
+  Text darunter lesbar bleibt)
+- **Freihändig zeichnen**, **Rechtecke/Ellipsen**, **Bereiche schwärzen**
 
 ### 3. Oberfläche
 - **Helles & dunkles Design** (umschaltbar, merkt sich die Wahl)
@@ -132,7 +140,8 @@ wird kein Backend benötigt.
   nicht enthält, weicht der Export für diese Zeichen auf den Standardfont aus.
 - **Schwärzen** deckt Inhalte visuell ab (schwarzer Balken). Der darunterliegende Text
   bleibt technisch im PDF – es ist **keine** sicherheitskritische Redaktion.
-- **Markieren** nutzt halbtransparente Flächen (kein echter Multiply-Blendmodus).
+- **Markieren**: der **Stift** nutzt einen echten Multiply-Blend (Text bleibt lesbar);
+  das **Rechteck** deckt mit einer halbtransparenten Fläche ab.
 - **Digitale Signaturen** im Originaldokument werden durch Bearbeitung ungültig (erwartetes
   Verhalten beim Editieren).
 - Rotierte Seiten mit bereits gesetzten Annotationen: Annotationen werden beim Drehen nicht

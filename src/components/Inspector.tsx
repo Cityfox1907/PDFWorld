@@ -38,7 +38,6 @@ import {
   List,
   ListOrdered,
   Crop,
-  Wand2,
   Eraser,
   Image as ImageIcon,
   PenTool,
@@ -741,11 +740,8 @@ function ImageProps({ el, set }: { el: ImageElement; set: (p: ElementPatch) => v
   return (
     <Group title="Bild">
       <div className="insp-actions" style={{ marginBottom: 12 }}>
-        <button className="btn ghost" onClick={() => editImage(el.id, 'crop')}>
+        <button className="btn ghost" onClick={() => editImage(el.id)}>
           <Crop size={15} /> Zuschneiden
-        </button>
-        <button className="btn ghost" onClick={() => editImage(el.id, 'bg')}>
-          <Wand2 size={15} /> Hintergrund
         </button>
       </div>
       <Row>

@@ -129,8 +129,8 @@ interface StoreState {
   clipboard: AnyElement | null;
   /** A typeface armed from the scan panel; the next click places a field in it. */
   pendingTextStyle: PendingTextStyle | null;
-  /** Open image editor (crop / background removal), targeting an image element. */
-  imageEditor: { id: string; mode: 'crop' | 'bg' } | null;
+  /** Open the image editor (crop), targeting an image element. */
+  imageEditor: { id: string } | null;
 
   past: Snapshot[];
   future: Snapshot[];
@@ -153,8 +153,8 @@ interface StoreState {
   addRecentColor: (color: string) => void;
   /** Arm (or clear) the typeface that the next page click writes in. */
   setPendingTextStyle: (style: PendingTextStyle | null) => void;
-  /** Open / close the image editor (crop or background removal) for an element. */
-  openImageEditor: (id: string, mode: 'crop' | 'bg') => void;
+  /** Open / close the image editor (crop) for an element. */
+  openImageEditor: (id: string) => void;
   closeImageEditor: () => void;
 
   // ── elements ──
@@ -176,6 +176,8 @@ interface StoreState {
   duplicatePage: (id: string) => void;
   rotatePage: (id: string, delta: number) => void;
   insertBlankAfter: (id: string | null) => void;
+  /** Revert a page to its original state (drop all added elements + rotation). Undoable. */
+  resetPage: (id: string) => void;
 
   // ── forms ──
   setFormValue: (name: string, value: string | boolean | string[]) => void;
@@ -395,8 +397,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setPendingTextStyle(style) {
     set({ pendingTextStyle: style });
   },
-  openImageEditor(id, mode) {
-    set({ imageEditor: { id, mode }, selectedElementId: id });
+  openImageEditor(id) {
+    set({ imageEditor: { id }, selectedElementId: id });
   },
   closeImageEditor() {
     set({ imageEditor: null });
@@ -530,6 +532,20 @@ export const useStore = create<StoreState>((set, get) => ({
       pages.splice(idx + 1, 0, blank);
       return { pages, currentPageId: blank.id };
     });
+  },
+  resetPage(id) {
+    const page = get().pages.find((p) => p.id === id);
+    if (!page) return;
+    // Already in its original state — nothing to revert (keeps the button a no-op
+    // instead of pushing an empty history step).
+    if (!page.elements.length && page.addedRotation === 0) return;
+    // Commit first so the reset is a single undoable step: the undo arrow brings
+    // back the last edited state, without wiping the rest of the history.
+    get().commit();
+    set((s) => ({
+      pages: s.pages.map((p) => (p.id === id ? { ...p, elements: [], addedRotation: 0 } : p)),
+      selectedElementId: null,
+    }));
   },
 
   setFormValue(name, value) {

@@ -12,7 +12,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useStore, visibleSize, type EditorPage } from '../state/store';
 import { useUI } from '../state/ui';
 import { renderPageToCanvas } from '../lib/pdf';
-import { RotateCw, Copy, Trash2, Plus, PanelLeftClose, ZoomIn, ZoomOut, LayoutGrid } from 'lucide-react';
+import { RotateCw, Copy, Trash2, Plus, PanelLeftClose, LayoutGrid } from 'lucide-react';
 
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2.5);
 
@@ -110,12 +110,10 @@ function SortablePage({ page, index, thumbZoom }: { page: EditorPage; index: num
 export function PageSidebar() {
   const pages = useStore((s) => s.pages);
   const reorderPages = useStore((s) => s.reorderPages);
-  const insertBlankAfter = useStore((s) => s.insertBlankAfter);
   const sidebarOpen = useUI((s) => s.sidebarOpen);
   const toggleSidebar = useUI((s) => s.toggleSidebar);
   const setOrganizer = useUI((s) => s.setOrganizer);
   const thumbZoom = useUI((s) => s.thumbZoom);
-  const setThumbZoom = useUI((s) => s.setThumbZoom);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -159,37 +157,6 @@ export function PageSidebar() {
             ))}
           </SortableContext>
         </DndContext>
-      </div>
-      <div className="sidebar-foot">
-        <div className="thumb-zoom" title="In die Seitenübersicht hineinzoomen">
-          <button
-            className="btn ghost icon"
-            onClick={() => setThumbZoom(thumbZoom - 0.25)}
-            disabled={thumbZoom <= 1}
-            title="Übersicht verkleinern"
-          >
-            <ZoomOut size={15} />
-          </button>
-          <input
-            type="range"
-            min={1}
-            max={3}
-            step={0.25}
-            value={thumbZoom}
-            onChange={(e) => setThumbZoom(Number(e.target.value))}
-          />
-          <button
-            className="btn ghost icon"
-            onClick={() => setThumbZoom(thumbZoom + 0.25)}
-            disabled={thumbZoom >= 3}
-            title="Übersicht vergrössern"
-          >
-            <ZoomIn size={15} />
-          </button>
-        </div>
-        <button className="btn ghost" onClick={() => insertBlankAfter(null)}>
-          <Plus size={15} /> Leere Seite
-        </button>
       </div>
     </aside>
   );

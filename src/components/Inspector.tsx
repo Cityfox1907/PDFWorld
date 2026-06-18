@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore, type ToolId, type ToolDefaults } from '../state/store';
-import type { AnyElement, ElementPatch, TextElement, InkElement } from '../lib/pdf';
+import type { AnyElement, ElementPatch, TextElement, ShapeElement, CalloutElement, ImageElement, InkElement, ShapeKind } from '../lib/pdf';
+import { isStrokeOnlyShape } from '../lib/pdf';
 import { inkDashArray } from '../lib/utils/ink';
 import { FontPicker } from './FontPicker';
 import { ColorPicker } from './ColorPicker';
@@ -27,6 +28,17 @@ import {
   Pencil,
   Square,
   Circle,
+  Triangle,
+  Diamond,
+  Star,
+  ArrowRight,
+  Minus,
+  Shapes,
+  MessageSquare,
+  List,
+  ListOrdered,
+  Crop,
+  Wand2,
   Eraser,
   Image as ImageIcon,
   PenTool,
@@ -96,12 +108,14 @@ const TOOL_META: Record<ToolId, { icon: LucideIcon; title: string; tip?: string 
   select: { icon: MousePointer2, title: 'Auswählen', tip: 'Element anklicken, um es zu bearbeiten. Mit den Pfeiltasten verschiebst du es pixelgenau (Shift = 10 px).' },
   'edit-text': { icon: ScanText, title: 'Text scannen', tip: 'Auf eine erkannte Zeile klicken, ihre Schrift übernehmen und anschliessend an die gewünschte Stelle klicken, um in genau dieser Schrift zu schreiben.' },
   text: { icon: Type, title: 'Text einfügen', tip: 'Auf die Seite klicken, um ein Textfeld einzufügen. Es wächst beim Tippen mit.' },
-  cut: { icon: Scissors, title: 'Bereich duplizieren', tip: 'Rechteck aufziehen — der Bereich wird in voller Qualität (1:1) dupliziert und frei verschiebbar eingefügt. Das Original bleibt erhalten.' },
+  callout: { icon: MessageSquare, title: 'Sprechblase', tip: 'Auf die Stelle klicken, auf die die Sprechblase zeigen soll — dann direkt lostippen.' },
+  cut: { icon: Scissors, title: 'Bereich ausschneiden', tip: 'Rechteck aufziehen oder mit gedrückter Maus einen freien Bereich umfahren — er wird in voller Qualität (1:1) als frei verschiebbares Stück herausgelöst. Das Original bleibt erhalten.' },
   brush: { icon: Paintbrush, title: 'Hintergrund-Pinsel' },
   highlight: { icon: Highlighter, title: 'Markieren' },
   draw: { icon: Pencil, title: 'Zeichnen' },
   rect: { icon: Square, title: 'Rechteck', tip: 'Aufziehen, um ein Rechteck zu zeichnen.' },
   ellipse: { icon: Circle, title: 'Ellipse', tip: 'Aufziehen, um eine Ellipse zu zeichnen.' },
+  shape: { icon: Shapes, title: 'Form', tip: 'Aufziehen, um die gewählte Form zu zeichnen.' },
   redact: { icon: Eraser, title: 'Schwärzen', tip: 'Bereich aufziehen, um ihn mit einem schwarzen Balken abzudecken.' },
   image: { icon: ImageIcon, title: 'Bild' },
   signature: { icon: PenTool, title: 'Unterschrift' },
@@ -111,10 +125,21 @@ const ELEMENT_META: Record<AnyElement['type'], { icon: LucideIcon; title: string
   text: { icon: Type, title: 'Text' },
   rect: { icon: Square, title: 'Rechteck' },
   ellipse: { icon: Circle, title: 'Ellipse' },
+  shape: { icon: Shapes, title: 'Form' },
+  callout: { icon: MessageSquare, title: 'Sprechblase' },
   highlight: { icon: Highlighter, title: 'Markierung' },
   ink: { icon: Pencil, title: 'Zeichnung' },
   image: { icon: ImageIcon, title: 'Bild' },
   signature: { icon: PenTool, title: 'Unterschrift' },
+};
+
+/** Per-shape icon + label so the inspector title/kind switcher reads clearly. */
+const SHAPE_META: Record<ShapeKind, { icon: LucideIcon; label: string }> = {
+  triangle: { icon: Triangle, label: 'Dreieck' },
+  diamond: { icon: Diamond, label: 'Raute' },
+  star: { icon: Star, label: 'Stern' },
+  arrow: { icon: ArrowRight, label: 'Pfeil' },
+  line: { icon: Minus, label: 'Linie' },
 };
 
 export function Inspector() {
@@ -141,13 +166,23 @@ export function Inspector() {
 
   if (el) {
     const meta = ELEMENT_META[el.type];
-    const title = el.type === 'ink' && (el as InkElement).highlight ? 'Marker' : meta.title;
+    let title = meta.title;
+    let icon = meta.icon;
+    if (el.type === 'ink' && (el as InkElement).highlight) title = 'Marker';
+    if (el.type === 'shape') {
+      const sm = SHAPE_META[(el as ShapeElement).shape];
+      title = sm.label;
+      icon = sm.icon;
+    }
     return (
       <aside className="inspector">
-        <Header icon={meta.icon} title={title} />
+        <Header icon={icon} title={title} />
         {el.type === 'text' && <TextProps el={el} set={set} />}
-        {el.type === 'rect' && <ShapeProps el={el} set={set} radius />}
-        {el.type === 'ellipse' && <ShapeProps el={el} set={set} />}
+        {el.type === 'rect' && <RectEllipseProps el={el} set={set} radius />}
+        {el.type === 'ellipse' && <RectEllipseProps el={el} set={set} />}
+        {el.type === 'shape' && <VectorShapeProps el={el} set={set} />}
+        {el.type === 'callout' && <CalloutProps el={el} set={set} />}
+        {(el.type === 'image' || el.type === 'signature') && <ImageProps el={el} set={set} />}
         {el.type === 'highlight' && (
           <Group title="Markierung">
             <Row>
@@ -232,31 +267,47 @@ function ToolSettings({
   const addRecentColor = useStore((s) => s.addRecentColor);
   const showToast = useStore((s) => s.showToast);
   const pendingTextStyle = useStore((s) => s.pendingTextStyle);
+  const setTool = useStore((s) => s.setTool);
 
-  if (activeTool === 'text') {
-    // A typeface armed from the scan panel takes over the next placement, so make that
-    // unmistakable instead of showing the (now irrelevant) default font controls.
-    if (pendingTextStyle) {
-      return (
-        <Group>
-          <p className="insp-note">✓ Schrift übernommen{pendingTextStyle.embeddedFontId ? ' (Original 1:1)' : ''}</p>
-          <p className="insp-tip" style={{ marginTop: 0 }}>
-            Klicke auf die Stelle, an der das Textfeld in dieser Schrift eingefügt werden soll.
-          </p>
-        </Group>
-      );
-    }
+  if (activeTool === 'text' || activeTool === 'callout') {
     return (
       <Group>
+        {/* Choose whether the next click drops a plain text field or a speech bubble. */}
         <Row>
-          <FontPicker value={tool.textFamily} onChange={(textFamily) => setToolDefaults({ textFamily })} />
+          <div className="seg insp-seg">
+            <button className={`seg-btn ${activeTool === 'text' ? 'active' : ''}`} onClick={() => setTool('text')}>
+              <Type size={14} /> Textfeld
+            </button>
+            <button className={`seg-btn ${activeTool === 'callout' ? 'active' : ''}`} onClick={() => setTool('callout')}>
+              <MessageSquare size={14} /> Sprechblase
+            </button>
+          </div>
         </Row>
-        <Row>
-          <label>Grösse</label>
-          <input className="field field-sm" type="number" min={4} max={400} value={tool.textSize} onChange={(e) => setToolDefaults({ textSize: Number(e.target.value) })} />
-          <label>Farbe</label>
-          <ColorPicker title="Schriftfarbe" value={tool.textColor} onChange={(c) => setToolDefaults({ textColor: c })} />
-        </Row>
+        {activeTool === 'callout' ? (
+          <p className="insp-tip" style={{ marginTop: 0 }}>
+            Auf die Stelle klicken, auf die die Sprechblase zeigen soll — dann direkt lostippen.
+          </p>
+        ) : pendingTextStyle ? (
+          // A typeface armed from the scan panel takes over the next placement.
+          <>
+            <p className="insp-note">✓ Schrift übernommen{pendingTextStyle.embeddedFontId ? ' (Original 1:1)' : ''}</p>
+            <p className="insp-tip" style={{ marginTop: 0 }}>
+              Klicke auf die Stelle, an der das Textfeld in dieser Schrift eingefügt werden soll.
+            </p>
+          </>
+        ) : (
+          <>
+            <Row>
+              <FontPicker value={tool.textFamily} onChange={(textFamily) => setToolDefaults({ textFamily })} />
+            </Row>
+            <Row>
+              <label>Grösse</label>
+              <input className="field field-sm" type="number" min={4} max={400} value={tool.textSize} onChange={(e) => setToolDefaults({ textSize: Number(e.target.value) })} />
+              <label>Farbe</label>
+              <ColorPicker title="Schriftfarbe" value={tool.textColor} onChange={(c) => setToolDefaults({ textColor: c })} />
+            </Row>
+          </>
+        )}
       </Group>
     );
   }
@@ -340,15 +391,61 @@ function ToolSettings({
     );
   }
 
-  if (activeTool === 'rect' || activeTool === 'ellipse') {
+  if (activeTool === 'rect' || activeTool === 'ellipse' || activeTool === 'shape') {
+    const strokeOnly = activeTool === 'shape' && isStrokeOnlyShape(tool.shapeKind);
+    return (
+      <Group>
+        {activeTool === 'shape' && (
+          <Row>
+            <div className="shape-kind-grid">
+              {(Object.keys(SHAPE_META) as ShapeKind[]).map((k) => {
+                const Icon = SHAPE_META[k].icon;
+                return (
+                  <button
+                    key={k}
+                    className={`shape-kind-btn ${tool.shapeKind === k ? 'active' : ''}`}
+                    title={SHAPE_META[k].label}
+                    onClick={() => setToolDefaults({ shapeKind: k })}
+                  >
+                    <Icon size={16} />
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+        )}
+        <Row>
+          {!strokeOnly && (
+            <>
+              <label>Füllung</label>
+              <ColorPicker title="Füllfarbe" value={tool.shapeFill} onChange={(c) => setToolDefaults({ shapeFill: c })} />
+            </>
+          )}
+          <label>{strokeOnly ? 'Farbe' : 'Rand'}</label>
+          <ColorPicker title="Randfarbe" value={tool.shapeStroke} onChange={(c) => setToolDefaults({ shapeStroke: c })} />
+        </Row>
+      </Group>
+    );
+  }
+
+  if (activeTool === 'cut') {
     return (
       <Group>
         <Row>
-          <label>Füllung</label>
-          <ColorPicker title="Füllfarbe" value={tool.shapeFill} onChange={(c) => setToolDefaults({ shapeFill: c })} />
-          <label>Rand</label>
-          <ColorPicker title="Randfarbe" value={tool.shapeStroke} onChange={(c) => setToolDefaults({ shapeStroke: c })} />
+          <div className="seg insp-seg">
+            <button className={`seg-btn ${tool.cutMode === 'rect' ? 'active' : ''}`} onClick={() => setToolDefaults({ cutMode: 'rect' })}>
+              Rechteck
+            </button>
+            <button className={`seg-btn ${tool.cutMode === 'lasso' ? 'active' : ''}`} onClick={() => setToolDefaults({ cutMode: 'lasso' })}>
+              Freihand
+            </button>
+          </div>
         </Row>
+        <p className="insp-tip" style={{ marginTop: 0 }}>
+          {tool.cutMode === 'rect'
+            ? 'Rechteck aufziehen — der Bereich wird 1:1 dupliziert und frei verschiebbar.'
+            : 'Mit gedrückter Maus den gewünschten Bereich umfahren — er wird entlang deiner Linie ausgeschnitten.'}
+        </p>
       </Group>
     );
   }
@@ -392,7 +489,7 @@ function ToolSettings({
     );
   }
 
-  // select / edit-text / cut / redact: no controls — the header (with its info toggle)
+  // select / edit-text / redact: no controls — the header (with its info toggle)
   // already says everything that used to be a wall of text.
   return null;
 }
@@ -426,6 +523,20 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
           </button>
           <button className={`seg-btn ${el.align === 'right' ? 'active' : ''}`} onClick={() => set({ align: 'right' })} title="Rechtsbündig">
             <AlignRight size={15} />
+          </button>
+        </div>
+      </Row>
+      <Row>
+        <label>Liste</label>
+        <div className="seg insp-seg">
+          <button className={`seg-btn ${(el.list ?? 'none') === 'none' ? 'active' : ''}`} onClick={() => set({ list: 'none' })} title="Keine Liste">
+            Keine
+          </button>
+          <button className={`seg-btn ${el.list === 'bullet' ? 'active' : ''}`} onClick={() => set({ list: 'bullet' })} title="Aufzählung">
+            <List size={15} />
+          </button>
+          <button className={`seg-btn ${el.list === 'number' ? 'active' : ''}`} onClick={() => set({ list: 'number' })} title="Nummerierte Liste">
+            <ListOrdered size={15} />
           </button>
         </div>
       </Row>
@@ -499,7 +610,7 @@ function InkProps({ el, set, commit }: { el: InkElement; set: (p: ElementPatch, 
   );
 }
 
-function ShapeProps({ el, set, radius }: { el: Extract<AnyElement, { type: 'rect' | 'ellipse' }>; set: (p: ElementPatch) => void; radius?: boolean }) {
+function RectEllipseProps({ el, set, radius }: { el: Extract<AnyElement, { type: 'rect' | 'ellipse' }>; set: (p: ElementPatch) => void; radius?: boolean }) {
   return (
     <Group title={el.type === 'rect' ? 'Rechteck' : 'Ellipse'}>
       <Row>
@@ -518,6 +629,148 @@ function ShapeProps({ el, set, radius }: { el: Extract<AnyElement, { type: 'rect
         <Row>
           <label>Radius</label>
           <input className="field field-sm" type="number" min={0} max={60} value={el.radius} onChange={(e) => set({ radius: Number(e.target.value) })} />
+        </Row>
+      )}
+    </Group>
+  );
+}
+
+function VectorShapeProps({ el, set }: { el: ShapeElement; set: (p: ElementPatch) => void }) {
+  const strokeOnly = isStrokeOnlyShape(el.shape);
+  return (
+    <Group title={SHAPE_META[el.shape].label}>
+      {/* Switch the form without leaving the inspector. */}
+      <Row>
+        <div className="shape-kind-grid">
+          {(Object.keys(SHAPE_META) as ShapeKind[]).map((k) => {
+            const Icon = SHAPE_META[k].icon;
+            return (
+              <button
+                key={k}
+                className={`shape-kind-btn ${el.shape === k ? 'active' : ''}`}
+                title={SHAPE_META[k].label}
+                onClick={() => set({ shape: k, fill: isStrokeOnlyShape(k) ? null : el.fill ?? '#ffffff' })}
+              >
+                <Icon size={16} />
+              </button>
+            );
+          })}
+        </div>
+      </Row>
+      {!strokeOnly && (
+        <Row>
+          <label>Füllung</label>
+          <ColorPicker title="Füllfarbe" value={el.fill ?? '#ffffff'} onChange={(c) => set({ fill: c })} />
+          <button className="btn ghost" onClick={() => set({ fill: null })}>
+            ohne
+          </button>
+        </Row>
+      )}
+      <Row>
+        <label>{strokeOnly ? 'Farbe' : 'Rand'}</label>
+        <ColorPicker title="Randfarbe" value={el.stroke ?? '#111111'} onChange={(c) => set({ stroke: c })} />
+        <input className="field field-sm" type="number" min={strokeOnly ? 1 : 0} max={24} step={0.5} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+      </Row>
+      <Row>
+        <label>Stil</label>
+        <div className="seg insp-seg">
+          {(['solid', 'dashed', 'dotted'] as const).map((d) => (
+            <button key={d} className={`seg-btn ${(el.dash ?? 'solid') === d ? 'active' : ''}`} onClick={() => set({ dash: d })}>
+              {d === 'solid' ? 'Voll' : d === 'dashed' ? 'Strich' : 'Punkt'}
+            </button>
+          ))}
+        </div>
+      </Row>
+    </Group>
+  );
+}
+
+function CalloutProps({ el, set }: { el: CalloutElement; set: (p: ElementPatch) => void }) {
+  return (
+    <>
+      <Group title="Text">
+        <Row>
+          <FontPicker value={el.family} onChange={(family) => set({ family })} />
+        </Row>
+        <Row>
+          <input className="field field-sm" type="number" min={4} max={200} value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />
+          <ColorPicker title="Textfarbe" value={el.color} onChange={(c) => set({ color: c })} />
+          <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold })} title="Fett">
+            <Bold size={15} />
+          </button>
+          <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic })} title="Kursiv">
+            <Italic size={15} />
+          </button>
+        </Row>
+        <Row>
+          <div className="seg insp-seg">
+            <button className={`seg-btn ${el.align === 'left' ? 'active' : ''}`} onClick={() => set({ align: 'left' })} title="Linksbündig">
+              <AlignLeft size={15} />
+            </button>
+            <button className={`seg-btn ${el.align === 'center' ? 'active' : ''}`} onClick={() => set({ align: 'center' })} title="Zentriert">
+              <AlignCenter size={15} />
+            </button>
+            <button className={`seg-btn ${el.align === 'right' ? 'active' : ''}`} onClick={() => set({ align: 'right' })} title="Rechtsbündig">
+              <AlignRight size={15} />
+            </button>
+          </div>
+        </Row>
+      </Group>
+      <Group title="Sprechblase">
+        <Row>
+          <label>Füllung</label>
+          <ColorPicker title="Blasenfarbe" value={el.fill} onChange={(c) => set({ fill: c })} />
+          <label>Rand</label>
+          <ColorPicker title="Randfarbe" value={el.stroke ?? '#f59e0b'} onChange={(c) => set({ stroke: c })} />
+        </Row>
+        <Row>
+          <label>Randstärke</label>
+          <input className="field field-sm" type="number" min={0} max={12} step={0.5} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+          <button className="btn ghost" onClick={() => set({ stroke: el.stroke ? null : '#f59e0b' })}>
+            {el.stroke ? 'ohne Rand' : 'mit Rand'}
+          </button>
+        </Row>
+      </Group>
+    </>
+  );
+}
+
+function ImageProps({ el, set }: { el: ImageElement; set: (p: ElementPatch) => void }) {
+  const editImage = useStore((s) => s.openImageEditor);
+  const hasBorder = !!el.borderColor && (el.borderWidth ?? 0) > 0;
+  return (
+    <Group title="Bild">
+      <div className="insp-actions" style={{ marginBottom: 12 }}>
+        <button className="btn ghost" onClick={() => editImage(el.id, 'crop')}>
+          <Crop size={15} /> Zuschneiden
+        </button>
+        <button className="btn ghost" onClick={() => editImage(el.id, 'bg')}>
+          <Wand2 size={15} /> Hintergrund
+        </button>
+      </div>
+      <Row>
+        <label>Rand</label>
+        <ColorPicker title="Randfarbe" value={el.borderColor ?? '#111111'} onChange={(c) => set({ borderColor: c, borderWidth: el.borderWidth || 2 })} />
+        <input
+          className="field field-sm"
+          type="number"
+          min={0}
+          max={40}
+          step={0.5}
+          value={el.borderWidth ?? 0}
+          onChange={(e) => set({ borderWidth: Number(e.target.value), borderColor: el.borderColor ?? '#111111' })}
+        />
+      </Row>
+      {hasBorder && (
+        <Row>
+          <label>Randstil</label>
+          <div className="seg insp-seg">
+            {(['solid', 'dashed', 'dotted'] as const).map((d) => (
+              <button key={d} className={`seg-btn ${(el.borderStyle ?? 'solid') === d ? 'active' : ''}`} onClick={() => set({ borderStyle: d })}>
+                {d === 'solid' ? 'Voll' : d === 'dashed' ? 'Strich' : 'Punkt'}
+              </button>
+            ))}
+          </div>
         </Row>
       )}
     </Group>

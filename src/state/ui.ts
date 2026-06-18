@@ -27,7 +27,7 @@ interface UIState {
   elementsPanelOpen: boolean;
   /** save dialog (rename + choose destination) before exporting */
   saveDialogOpen: boolean;
-  /** thumbnail magnification in the page overview (1 = compact … 3 = read the text) */
+  /** thumbnail magnification in the page overview (kept at 1; the slider was removed) */
   thumbZoom: number;
   theme: Theme;
   openSignature: () => void;
@@ -39,7 +39,6 @@ interface UIState {
   setElementsPanel: (open: boolean) => void;
   openSaveDialog: () => void;
   closeSaveDialog: () => void;
-  setThumbZoom: (z: number) => void;
   toggleTheme: () => void;
 }
 
@@ -60,7 +59,6 @@ export const useUI = create<UIState>((set) => ({
   setElementsPanel: (open) => set({ elementsPanelOpen: open }),
   openSaveDialog: () => set({ saveDialogOpen: true }),
   closeSaveDialog: () => set({ saveDialogOpen: false }),
-  setThumbZoom: (z) => set({ thumbZoom: Math.max(1, Math.min(3, Number(z.toFixed(2)))) }),
   toggleTheme: () =>
     set((s) => {
       const theme: Theme = s.theme === 'light' ? 'dark' : 'light';

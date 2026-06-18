@@ -9,10 +9,11 @@ import {
   LineCapStyle,
   BlendMode,
 } from 'pdf-lib';
-import type { AnyElement, TextElement, RectElement, EllipseElement, HighlightElement, ImageElement, InkElement } from './types';
+import type { AnyElement, TextElement, RectElement, EllipseElement, ShapeElement, CalloutElement, HighlightElement, ImageElement, InkElement, FontFamilyKey } from './types';
 import { standardFontFor, BASELINE_RATIO } from './fonts';
 import { baseFamilyOf, fontFileUrl } from './fontCatalog';
 import { getEmbeddedFont } from './embeddedFonts';
+import { shapeOutline, isStrokeOnlyShape, calloutOutline, calloutTailHeight, CALLOUT_PAD, type Pt } from './shapes';
 import { placeBox, placeRotatedBox, rotateViewPoint, axisAngleDeg, type ToPdfPoint, type BoxPlacement } from './coords';
 
 /** Where the baseline sits below a line's top, as a fraction of the font size. */
@@ -174,6 +175,10 @@ export class Baker {
         return this.drawHighlight(page, el, toPdfPoint);
       case 'ellipse':
         return this.drawEllipse(page, el, toPdfPoint);
+      case 'shape':
+        return this.drawShape(page, el, toPdfPoint);
+      case 'callout':
+        return this.drawCallout(page, el, toPdfPoint);
       case 'image':
       case 'signature':
         return this.drawImage(page, el, toPdfPoint);
@@ -182,6 +187,82 @@ export class Baker {
       case 'text':
         return this.drawText(page, el, toPdfPoint);
     }
+  }
+
+  /** A free-rotation-aware SVG path from view-space points (shapes & callouts). */
+  private pathFromPoints(points: Pt[], closed: boolean, rotation: number, cx: number, cy: number, toPdfPoint: ToPdfPoint): string {
+    const conv = (p: Pt): [number, number] =>
+      rotation ? toPdfPoint(...rotateViewPoint(p.x, p.y, cx, cy, rotation)) : toPdfPoint(p.x, p.y);
+    // drawSvgPath treats the path's y as growing downward, so each content point's y
+    // is negated; with x=y=0 origin and unit scale the point lands 1:1 (see drawInk).
+    const d = points.map((p, i) => {
+      const c = conv(p);
+      return `${i === 0 ? 'M' : 'L'} ${c[0].toFixed(2)} ${(-c[1]).toFixed(2)}`;
+    }).join(' ');
+    return closed ? `${d} Z` : d;
+  }
+
+  private drawShape(page: PDFPage, el: ShapeElement, toPdfPoint: ToPdfPoint): void {
+    const rot = el.rotation ?? 0;
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    const { points, closed } = shapeOutline(el.shape, el.x, el.y, el.width, el.height, el.flip ?? false);
+    const d = this.pathFromPoints(points, closed, rot, cx, cy, toPdfPoint);
+    const hasFill = !isStrokeOnlyShape(el.shape) && !!el.fill;
+    const hasStroke = !!el.stroke && el.strokeWidth > 0;
+    page.drawSvgPath(d, {
+      x: 0,
+      y: 0,
+      color: hasFill ? rgbColor(el.fill!) : undefined,
+      opacity: hasFill ? el.opacity : undefined,
+      borderColor: hasStroke ? rgbColor(el.stroke!) : undefined,
+      borderWidth: hasStroke ? el.strokeWidth : undefined,
+      borderOpacity: hasStroke ? el.opacity : undefined,
+      borderDashArray: hasStroke ? dashArrayFor(el.dash, el.strokeWidth) : undefined,
+      borderLineCap: LineCapStyle.Round,
+    });
+  }
+
+  private async drawCallout(page: PDFPage, el: CalloutElement, toPdfPoint: ToPdfPoint): Promise<void> {
+    const rot = el.rotation ?? 0;
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    const { points, closed } = calloutOutline(el.x, el.y, el.width, el.height);
+    const d = this.pathFromPoints(points, closed, rot, cx, cy, toPdfPoint);
+    const hasStroke = !!el.stroke && el.strokeWidth > 0;
+    page.drawSvgPath(d, {
+      x: 0,
+      y: 0,
+      color: rgbColor(el.fill),
+      opacity: el.opacity,
+      borderColor: hasStroke ? rgbColor(el.stroke!) : undefined,
+      borderWidth: hasStroke ? el.strokeWidth : undefined,
+      borderOpacity: hasStroke ? el.opacity : undefined,
+      borderLineCap: LineCapStyle.Round,
+    });
+    // Text inside the bubble, leaving room for the tail strip + padding. The text
+    // pivots around the WHOLE callout's centre so it stays aligned under rotation.
+    const tailH = calloutTailHeight(el.height);
+    const pad = CALLOUT_PAD;
+    await this.bakeTextBlock(page, toPdfPoint, {
+      x: el.x + pad,
+      y: el.y + pad,
+      width: Math.max(1, el.width - 2 * pad),
+      height: Math.max(1, el.height - tailH - 2 * pad),
+      rotation: rot,
+      pivotX: cx,
+      pivotY: cy,
+      text: el.text,
+      size: el.size,
+      lineHeight: el.lineHeight,
+      align: el.align,
+      color: el.color,
+      opacity: el.opacity,
+      family: el.family,
+      bold: el.bold,
+      italic: el.italic,
+      clip: true,
+    });
   }
 
   /**
@@ -254,6 +335,34 @@ export class Baker {
       rotate: degrees(p.rotateDeg),
       opacity: el.opacity,
     });
+    // Optional decorative border, drawn as the box outline so dashed/dotted styles
+    // and free rotation all compose like the other vector elements. The outline is
+    // inset by half the stroke width so the border sits *inside* the box edge,
+    // matching the on-screen CSS border (box-sizing: border-box). Round caps are
+    // required for the dotted pattern (a zero-length dash) to render as dots.
+    const bw = el.borderWidth ?? 0;
+    if (el.borderColor && bw > 0) {
+      const rot = el.rotation ?? 0;
+      const cx = el.x + el.width / 2;
+      const cy = el.y + el.height / 2;
+      const inset = bw / 2;
+      const corners: Pt[] = [
+        { x: el.x + inset, y: el.y + inset },
+        { x: el.x + el.width - inset, y: el.y + inset },
+        { x: el.x + el.width - inset, y: el.y + el.height - inset },
+        { x: el.x + inset, y: el.y + el.height - inset },
+      ];
+      const d = this.pathFromPoints(corners, true, rot, cx, cy, toPdfPoint);
+      page.drawSvgPath(d, {
+        x: 0,
+        y: 0,
+        borderColor: rgbColor(el.borderColor),
+        borderWidth: bw,
+        borderOpacity: el.opacity,
+        borderDashArray: dashArrayFor(el.borderStyle, bw),
+        borderLineCap: LineCapStyle.Round,
+      });
+    }
   }
 
   private drawInk(page: PDFPage, el: InkElement, toPdfPoint: ToPdfPoint): void {
@@ -300,81 +409,142 @@ export class Baker {
         color: rgbColor(el.coverColor),
       });
     }
+    await this.bakeTextBlock(page, toPdfPoint, {
+      x: el.x,
+      y: el.y,
+      width: el.width,
+      height: el.height,
+      rotation: el.rotation ?? 0,
+      text: el.text,
+      size: el.size,
+      lineHeight: el.lineHeight,
+      align: el.align,
+      color: el.color,
+      opacity: el.opacity,
+      family: el.family,
+      bold: el.bold,
+      italic: el.italic,
+      embeddedFontId: el.embeddedFontId,
+      list: el.list,
+    });
+  }
 
-    // Fidelity order: the original captured font (true 1:1 for scanned text) →
-    // the chosen web font → the metric-compatible standard font. A standard font
-    // is always kept ready as a per-line fallback for glyphs a custom subset
-    // cannot encode, so the export can never break.
-    const origFont = await this.embeddedFont(el);
-    const webFont = origFont ? null : await this.webFont(el);
-    const stdFont = await this.standardFont(el);
+  /**
+   * Draw a block of lines for a text field or a callout. Fidelity order: the original
+   * captured font (true 1:1 for scanned text) → the chosen web font → the metric
+   * standard font, which also backstops glyphs a custom subset can't encode so the
+   * export never breaks. Supports free rotation (around `pivot`, default the block's
+   * own centre) and optional bullet/number list markers.
+   */
+  private async bakeTextBlock(page: PDFPage, toPdfPoint: ToPdfPoint, o: TextBlockOptions): Promise<void> {
+    const fontEl = { family: o.family, bold: o.bold, italic: o.italic, embeddedFontId: o.embeddedFontId } as TextElement;
+    const origFont = await this.embeddedFont(fontEl);
+    const webFont = origFont ? null : await this.webFont(fontEl);
+    const stdFont = await this.standardFont(fontEl);
     const unicodeFont = origFont ?? webFont; // carries its own glyphs (full Unicode)
-    const color = rgbColor(el.color);
-    const lines = el.text.length ? el.text.split('\n') : [''];
+    const color = rgbColor(o.color);
+    const rawLines = o.text.length ? o.text.split('\n') : [''];
+    const list = o.list && o.list !== 'none' ? o.list : null;
+    const markerGap = o.size * 0.35;
 
-    // Free rotation (clockwise on screen) pivots around the element's centre.
-    const rot = el.rotation ?? 0;
-    const cx = el.x + el.width / 2;
-    const cy = el.y + el.height / 2;
+    const rot = o.rotation ?? 0;
+    const cx = o.pivotX ?? o.x + o.width / 2;
+    const cy = o.pivotY ?? o.y + o.height / 2;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (!line) continue;
-
-      const lineTop = el.y + i * el.size * el.lineHeight;
-      const baselineY = lineTop + el.size * ASCENT_RATIO;
-      const x0 = lineX(el, line, unicodeFont ?? stdFont);
+    const drawAt = (vx: number, vy: number, text: string) => {
       let anchor: [number, number];
       let rotateDeg: number;
       if (rot) {
-        // Rotate the baseline's start (and a unit step along it) in view space,
-        // then read the content-space angle straight off the converted points so
-        // the page rotation and the free angle compose without special cases.
-        anchor = toPdfPoint(...rotateViewPoint(x0, baselineY, cx, cy, rot));
-        const next = toPdfPoint(...rotateViewPoint(x0 + 1, baselineY, cx, cy, rot));
+        anchor = toPdfPoint(...rotateViewPoint(vx, vy, cx, cy, rot));
+        const next = toPdfPoint(...rotateViewPoint(vx + 1, vy, cx, cy, rot));
         rotateDeg = (Math.atan2(next[1] - anchor[1], next[0] - anchor[0]) * 180) / Math.PI;
       } else {
-        anchor = toPdfPoint(x0, baselineY);
-        rotateDeg = axisAngleDeg(toPdfPoint, x0, baselineY);
+        anchor = toPdfPoint(vx, vy);
+        rotateDeg = axisAngleDeg(toPdfPoint, vx, vy);
       }
-
-      const draw = (font: PDFFont, text: string) =>
-        page.drawText(text, {
-          x: anchor[0],
-          y: anchor[1],
-          size: el.size,
-          font,
-          color,
-          opacity: el.opacity,
-          rotate: degrees(rotateDeg),
-        });
-
+      const draw = (font: PDFFont, t: string) =>
+        page.drawText(t, { x: anchor[0], y: anchor[1], size: o.size, font, color, opacity: o.opacity, rotate: degrees(rotateDeg) });
       try {
-        // Custom fonts carry their own glyphs; standard fonts are WinAnsi, so
-        // sanitise unsupported characters to keep them from throwing.
-        if (unicodeFont) draw(unicodeFont, line);
-        else draw(stdFont, sanitizeWinAnsi(line));
+        if (unicodeFont) draw(unicodeFont, text);
+        else draw(stdFont, sanitizeWinAnsi(text));
       } catch {
         try {
-          draw(stdFont, sanitizeWinAnsi(line));
+          draw(stdFont, sanitizeWinAnsi(text));
         } catch {
           /* a single unrenderable line must never abort the export */
         }
+      }
+    };
+
+    const measureFont = unicodeFont ?? stdFont;
+    let num = 0;
+    for (let i = 0; i < rawLines.length; i++) {
+      const raw = rawLines[i];
+      // Clip overflowing lines to the box (callouts have a fixed bubble height, so the
+      // export must match the on-screen `overflow:hidden`; text fields auto-grow, so
+      // they pass clip=false and nothing is dropped).
+      if (o.clip && i * o.size * o.lineHeight + o.size > o.height) break;
+      const baselineY = o.y + i * o.size * o.lineHeight + o.size * ASCENT_RATIO;
+      if (list) {
+        num++;
+        const marker = list === 'bullet' ? '•' : `${num}.`;
+        // Right-align the marker just left of the text column (hanging in the margin),
+        // exactly like the on-screen marker column, so screen and export agree. Measure
+        // with the SAME font the marker is drawn in, or it lands off-column.
+        let mw = o.size * 0.5;
+        try {
+          mw = measureFont.widthOfTextAtSize(marker, o.size);
+        } catch {
+          /* keep the estimate */
+        }
+        drawAt(o.x - markerGap - mw, baselineY, marker);
+        if (raw) {
+          const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size);
+          drawAt(x0, baselineY, raw);
+        }
+      } else if (raw) {
+        const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size);
+        drawAt(x0, baselineY, raw);
       }
     }
   }
 }
 
-/** Left edge of a line given the element's alignment, measured with the active font. */
-function lineX(el: TextElement, line: string, font: PDFFont): number {
-  if (el.align === 'left') return el.x;
+/** Options for {@link Baker.bakeTextBlock}: a positioned, styled run of lines. */
+interface TextBlockOptions {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  /** rotation pivot in view space; defaults to the block's own centre */
+  pivotX?: number;
+  pivotY?: number;
+  text: string;
+  size: number;
+  lineHeight: number;
+  align: 'left' | 'center' | 'right';
+  color: string;
+  opacity: number;
+  family: FontFamilyKey;
+  bold: boolean;
+  italic: boolean;
+  embeddedFontId?: string;
+  list?: 'none' | 'bullet' | 'number';
+  /** clip lines that don't fit the box height (fixed-height callouts; off for text). */
+  clip?: boolean;
+}
+
+/** Left edge of a line given alignment, measured with the active font. */
+function lineX(x: number, width: number, line: string, align: 'left' | 'center' | 'right', font: PDFFont, size: number): number {
+  if (align === 'left') return x;
   let textWidth: number;
   try {
-    textWidth = font.widthOfTextAtSize(line, el.size);
+    textWidth = font.widthOfTextAtSize(line, size);
   } catch {
-    return el.x; // measurement failed → fall back to left alignment
+    return x; // measurement failed → fall back to left alignment
   }
-  return el.align === 'center' ? el.x + (el.width - textWidth) / 2 : el.x + el.width - textWidth;
+  return align === 'center' ? x + (width - textWidth) / 2 : x + width - textWidth;
 }
 
 /** Replace characters outside the WinAnsi range so StandardFonts never throw. */

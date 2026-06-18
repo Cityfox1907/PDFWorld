@@ -9,10 +9,13 @@
  */
 export function nearestBaseline(base: number, targets: number[], threshold: number): number | null {
   let best: number | null = null;
-  let bestDist = threshold;
+  // Start just above the threshold so a target exactly at `threshold` still counts,
+  // while strict `<` keeps the FIRST (closest) of any equidistant targets — a stable,
+  // deterministic choice rather than "whichever appears last in the array".
+  let bestDist = threshold + 1e-6;
   for (const t of targets) {
     const d = Math.abs(t - base);
-    if (d <= bestDist) {
+    if (d < bestDist) {
       bestDist = d;
       best = t;
     }

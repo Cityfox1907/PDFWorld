@@ -26,9 +26,18 @@ export type ElementType =
   | 'rect'
   | 'highlight'
   | 'ellipse'
+  | 'shape'
+  | 'callout'
   | 'image'
   | 'signature'
   | 'ink';
+
+/**
+ * The vector shapes offered under the "Elemente" menu, in addition to the
+ * dedicated rectangle and ellipse element types. Each is drawn from a single
+ * geometry helper (see shapes.ts) so screen and export match exactly.
+ */
+export type ShapeKind = 'triangle' | 'diamond' | 'star' | 'arrow' | 'line';
 
 export interface BaseElement {
   id: string;
@@ -73,6 +82,12 @@ export interface TextElement extends BaseElement {
   align: 'left' | 'center' | 'right';
   lineHeight: number;
   /**
+   * Optional list rendering: every line is prefixed with a bullet ('•') or an
+   * incrementing number ('1.', '2.', …) on screen and on export. Absent/'none'
+   * keeps plain text.
+   */
+  list?: 'none' | 'bullet' | 'number';
+  /**
    * Set when this text element *replaces* existing PDF text. The bake layer first
    * paints `coverColor` behind the text to hide the original glyphs (true
    * in-place editing). The color is sampled from the page background by the editor.
@@ -100,6 +115,40 @@ export interface EllipseElement extends BaseElement {
   strokeWidth: number;
 }
 
+export interface ShapeElement extends BaseElement {
+  type: 'shape';
+  shape: ShapeKind;
+  fill: string | null;
+  stroke: string | null;
+  strokeWidth: number;
+  /** stroke style for outlines and the line/arrow shapes */
+  dash?: 'solid' | 'dashed' | 'dotted';
+  /** for the 'line' shape: true ⇒ runs top-right → bottom-left (drag direction) */
+  flip?: boolean;
+}
+
+/**
+ * A speech-bubble / comment annotation: a rounded bubble with a small tail that
+ * holds editable text — for remarks placed on the page like a sticky note.
+ */
+export interface CalloutElement extends BaseElement {
+  type: 'callout';
+  text: string;
+  family: FontFamilyKey;
+  size: number;
+  bold: boolean;
+  italic: boolean;
+  /** text colour */
+  color: string;
+  align: 'left' | 'center' | 'right';
+  lineHeight: number;
+  /** bubble fill */
+  fill: string;
+  /** bubble border (null = no border) */
+  stroke: string | null;
+  strokeWidth: number;
+}
+
 export interface HighlightElement extends BaseElement {
   type: 'highlight';
   /** hex color; alpha is applied via opacity + multiply blend */
@@ -112,6 +161,10 @@ export interface ImageElement extends BaseElement {
   src: string;
   /** intrinsic aspect ratio, used to keep proportions while resizing */
   aspect: number;
+  /** optional decorative border drawn around the image (screen + export) */
+  borderColor?: string;
+  borderWidth?: number;
+  borderStyle?: 'solid' | 'dashed' | 'dotted';
 }
 
 export interface InkElement extends BaseElement {
@@ -138,6 +191,8 @@ export type AnyElement =
   | TextElement
   | RectElement
   | EllipseElement
+  | ShapeElement
+  | CalloutElement
   | HighlightElement
   | ImageElement
   | InkElement;

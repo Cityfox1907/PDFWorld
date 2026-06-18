@@ -295,6 +295,13 @@ async function run(): Promise<void> {
       { id: 'hp', type: 'ink', x: 40, y: 160, width: 130, height: 24, opacity: 0.4, z: 4.5, points: [ { x: 40, y: 168 }, { x: 100, y: 176 }, { x: 168, y: 162 } ], color: '#ffe24d', strokeWidth: 14, highlight: true },
       { id: 'i', type: 'image', x: 200, y: 200, width: 60, height: 60, opacity: 1, z: 5, src: PNG_1x1, aspect: 1 },
       { id: 's', type: 'signature', x: 200, y: 300, width: 120, height: 40, opacity: 1, z: 6, src: PNG_1x1, aspect: 3 },
+      // New: vector shapes (filled star + a dashed line), a list, a callout bubble and
+      // an image with a dashed border — all must bake without throwing.
+      { id: 'star', type: 'shape', x: 250, y: 120, width: 60, height: 60, opacity: 1, z: 7, shape: 'star', fill: '#ffd84d', stroke: '#333333', strokeWidth: 1.5, dash: 'solid' },
+      { id: 'ln', type: 'shape', x: 250, y: 210, width: 90, height: 4, opacity: 1, z: 7.2, shape: 'line', fill: null, stroke: '#333333', strokeWidth: 2, dash: 'dashed' },
+      { id: 'imb', type: 'image', x: 300, y: 360, width: 50, height: 50, opacity: 1, z: 7.5, src: PNG_1x1, aspect: 1, borderColor: '#0a84ff', borderWidth: 2, borderStyle: 'dashed' },
+      { ...textEl({ id: 'lst', text: 'ITEMA\nITEMB', x: 60, y: 470 }), list: 'bullet' } as AnyElement,
+      { id: 'cal', type: 'callout', x: 200, y: 440, width: 160, height: 90, opacity: 1, z: 8, text: 'NOTED', family: 'sans', size: 11, bold: false, italic: false, color: '#000000', align: 'left', lineHeight: 1.3, fill: '#fef3c7', stroke: '#f59e0b', strokeWidth: 1 } as AnyElement,
       textEl({ id: 'm', text: 'MULTI\nLINE', align: 'center', x: 60, y: 300 }),
       textEl({ id: 'cov', text: 'REPLACED', x: 60, y: 360, coverColor: '#ffffff' }),
       // A scanned edit referencing an original font that ISN'T available here:
@@ -308,6 +315,8 @@ async function run(): Promise<void> {
     ok('original text + baked multiline text present', text[0].includes('ALPHA') && text[0].includes('MULTI'));
     ok('cover-replaced text baked', text[0].includes('REPLACED'));
     ok('missing embedded font falls back to standard', text[0].includes('ORIGINAL'));
+    ok('bullet-list text baked', text[0].includes('ITEMA') && text[0].includes('ITEMB'));
+    ok('callout bubble text baked', text[0].includes('NOTED'));
   }
 
   // ── hidden elements are skipped; dashed/dotted ink bakes cleanly ──

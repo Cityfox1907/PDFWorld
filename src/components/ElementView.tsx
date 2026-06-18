@@ -1,13 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { cssStackFor, embeddedFontFamily, BASELINE_RATIO, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
+import {
+  cssStackFor,
+  embeddedFontFamily,
+  shapeOutline,
+  calloutOutline,
+  calloutTailHeight,
+  pointsToSvgPath,
+  isStrokeOnlyShape,
+  CALLOUT_PAD,
+  BASELINE_RATIO,
+  type AnyElement,
+  type ElementPatch,
+  type TextElement,
+  type ShapeElement,
+  type CalloutElement,
+  type InkElement,
+} from '../lib/pdf';
 import { nearestBaseline } from '../lib/utils/align';
 import { inkDashArray } from '../lib/utils/ink';
 import { Lock, Unlock } from 'lucide-react';
 
-// Screen-pixel tolerance for the visual baseline guide while dragging text — tight,
-// because the line is a confirmation of exact alignment, never a magnet.
-const ALIGN_TOL = 1.5;
+// Screen-pixel catch radius for the alignment magnet while *dragging* text. Generous
+// enough that exact alignment is effortless, small enough never to fight a free move.
+const SNAP_TOL = 6;
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 type Handle = (typeof HANDLES)[number];
@@ -23,15 +39,19 @@ interface Props {
   editTextMode?: boolean;
   /** baselines (view-points) a dragged text box may snap to for alignment */
   alignBaselines?: number[];
-  /** report the active alignment guide while dragging (null clears it) */
+  /** left edges (view-points) a dragged text box may snap to (list/paragraph starts) */
+  alignXs?: number[];
+  /** report the active horizontal (baseline) guide while dragging (null clears it) */
   onAlignGuide?: (y: number | null) => void;
+  /** report the active vertical (left-edge) guide while dragging (null clears it) */
+  onAlignGuideX?: (x: number | null) => void;
   onStartEdit: () => void;
   onEndEdit: () => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   commit: () => void;
 }
 
-export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, alignBaselines, onAlignGuide, onStartEdit, onEndEdit, updateElement, commit }: Props) {
+export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, alignBaselines, alignXs, onAlignGuide, onAlignGuideX, onStartEdit, onEndEdit, updateElement, commit }: Props) {
   const selectedId = useStore((s) => s.selectedElementId);
   const selectElement = useStore((s) => s.selectElement);
   const selected = selectedId === el.id && interactive;
@@ -84,23 +104,44 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       const dx = (ev.clientX - startX) / scale;
       const dy = (ev.clientY - startY) / scale;
       if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
-      const y = origin.y + dy; // free movement, no magnet
-      // Visual-only guide: light up the shared line when this text's baseline lands
-      // exactly on a neighbour's, then let it vanish as soon as you move on.
-      let guide: number | null = null;
-      if (el.type === 'text' && !el.rotation && alignBaselines && alignBaselines.length) {
+      let nx = origin.x + dx;
+      let ny = origin.y + dy;
+      // Snap a moving TEXT box onto a neighbour's baseline (horizontal) or onto a
+      // neighbour's left edge (vertical) — both measured on the letters, not the box —
+      // so the starts of lists/paragraphs and shared baselines line up precisely. A
+      // gentle magnet (SNAP_TOL) makes exact alignment effortless without trapping a
+      // free move; the matching guide lights up while it's engaged.
+      let guideY: number | null = null;
+      let guideX: number | null = null;
+      if (el.type === 'text' && !el.rotation) {
         const size = (el as TextElement).size;
-        guide = nearestBaseline(y + size * BASELINE_RATIO, alignBaselines, ALIGN_TOL / scale);
+        const tol = SNAP_TOL / scale;
+        if (alignBaselines && alignBaselines.length) {
+          const snapY = nearestBaseline(ny + size * BASELINE_RATIO, alignBaselines, tol);
+          if (snapY != null) {
+            ny = snapY - size * BASELINE_RATIO;
+            guideY = snapY;
+          }
+        }
+        if (alignXs && alignXs.length) {
+          const snapX = nearestBaseline(nx, alignXs, tol);
+          if (snapX != null) {
+            nx = snapX;
+            guideX = snapX;
+          }
+        }
       }
-      onAlignGuide?.(guide);
-      const patch: ElementPatch = { x: origin.x + dx, y };
-      if (inkPoints) patch.points = inkPoints.map((p) => ({ x: p.x + dx, y: p.y + (y - origin.y) }));
+      onAlignGuide?.(guideY);
+      onAlignGuideX?.(guideX);
+      const patch: ElementPatch = { x: nx, y: ny };
+      if (inkPoints) patch.points = inkPoints.map((p) => ({ x: p.x + (nx - origin.x), y: p.y + (ny - origin.y) }));
       updateElement(pageId, el.id, patch);
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       onAlignGuide?.(null);
+      onAlignGuideX?.(null);
       if (moved) commit();
     };
     window.addEventListener('pointermove', move);
@@ -165,7 +206,7 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       className={`el ${selected ? 'selected' : ''} ${locked ? 'locked' : ''}`}
       style={base}
       onPointerDown={startMove}
-      onDoubleClick={() => el.type === 'text' && interactive && !locked && onStartEdit()}
+      onDoubleClick={() => (el.type === 'text' || el.type === 'callout') && interactive && !locked && onStartEdit()}
     >
       <ElementBody el={el} scale={scale} editing={editing} onEndEdit={onEndEdit} updateElement={updateElement} pageId={pageId} />
       {selected && !editing && !locked && (
@@ -223,7 +264,8 @@ function ElementBody({
       // Pre-select the content so existing text turns blue and a single keystroke
       // replaces it — the caret is instantly ready for new fields too.
       taRef.current.select();
-      fitToContent(taRef.current);
+      // Only plain text fields auto-grow; a callout keeps its drawn bubble size.
+      if (el.type === 'text') fitToContent(taRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
@@ -244,41 +286,74 @@ function ElementBody({
         // behind it so the original glyphs are hidden live in the editor too.
         background: t.coverColor ?? undefined,
       };
+      // List markers hang in the margin to the LEFT of the box (so the box width — and
+      // the left-edge alignment guide — stays on the text itself, matching the export).
+      const listOn = t.list && t.list !== 'none';
+      const markerCol = listOn ? (
+        <div
+          className="list-markers"
+          style={{
+            position: 'absolute',
+            right: '100%',
+            top: 0,
+            marginRight: t.size * 0.35 * scale,
+            fontFamily: textStyle.fontFamily,
+            fontSize: t.size * scale,
+            fontWeight: textStyle.fontWeight,
+            fontStyle: textStyle.fontStyle,
+            lineHeight: t.lineHeight,
+            color: t.color,
+            textAlign: 'right',
+            whiteSpace: 'pre',
+            pointerEvents: 'none',
+          }}
+        >
+          {(t.text.length ? t.text.split('\n') : ['']).map((_, i) => (
+            <div key={i}>{t.list === 'bullet' ? '•' : `${i + 1}.`}</div>
+          ))}
+        </div>
+      ) : null;
       if (editing) {
         return (
-          <textarea
-            ref={taRef}
-            className="text-edit"
-            style={textStyle}
-            // wrap=off so the textarea never soft-wraps: each line keeps its true width,
-            // which is what the auto-fit below measures (and what the export draws).
-            wrap="off"
-            defaultValue={t.text}
-            onChange={(e) => {
-              const ta = e.currentTarget;
-              const width = Math.max(el.width, (ta.scrollWidth + 2) / scale);
-              const height = Math.max(el.height, ta.scrollHeight / scale);
-              updateElement(pageId, el.id, { text: ta.value, width, height });
-            }}
-            onBlur={onEndEdit}
-            onPointerDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              // Enter finishes the field (Shift+Enter adds a line); Escape also exits.
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                e.currentTarget.blur();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-            }}
-          />
+          <>
+            {markerCol}
+            <textarea
+              ref={taRef}
+              className="text-edit"
+              style={textStyle}
+              // wrap=off so the textarea never soft-wraps: each line keeps its true width,
+              // which is what the auto-fit below measures (and what the export draws).
+              wrap="off"
+              defaultValue={t.text}
+              onChange={(e) => {
+                const ta = e.currentTarget;
+                const width = Math.max(el.width, (ta.scrollWidth + 2) / scale);
+                const height = Math.max(el.height, ta.scrollHeight / scale);
+                updateElement(pageId, el.id, { text: ta.value, width, height });
+              }}
+              onBlur={onEndEdit}
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                // Enter finishes the field (Shift+Enter adds a line); Escape also exits.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+              }}
+            />
+          </>
         );
       }
       return (
-        <div className="text-body" style={textStyle}>
-          {t.text || <span className="text-placeholder">Text…</span>}
-        </div>
+        <>
+          {markerCol}
+          <div className="text-body" style={textStyle}>
+            {t.text || <span className="text-placeholder">Text…</span>}
+          </div>
+        </>
       );
     }
     case 'rect': {
@@ -305,12 +380,86 @@ function ElementBody({
         />
       );
     }
+    case 'shape': {
+      const s = el as ShapeElement;
+      const { points, closed } = shapeOutline(s.shape, 0, 0, s.width * scale, s.height * scale, s.flip ?? false);
+      return (
+        <svg className="shape-body" width={s.width * scale} height={s.height * scale} style={{ overflow: 'visible', pointerEvents: 'none' }}>
+          <path
+            d={pointsToSvgPath(points, closed)}
+            fill={isStrokeOnlyShape(s.shape) ? 'none' : s.fill ?? 'none'}
+            stroke={s.stroke ?? 'none'}
+            strokeWidth={(s.stroke ? s.strokeWidth : 0) * scale}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            strokeDasharray={s.stroke ? inkDashArray(s.dash, s.strokeWidth * scale) : undefined}
+          />
+        </svg>
+      );
+    }
+    case 'callout': {
+      const c = el as CalloutElement;
+      const { points, closed } = calloutOutline(0, 0, c.width * scale, c.height * scale);
+      const tailH = calloutTailHeight(c.height);
+      const textStyle: React.CSSProperties = {
+        fontFamily: cssStackFor(c.family),
+        fontSize: c.size * scale,
+        fontWeight: c.bold ? 700 : 400,
+        fontStyle: c.italic ? 'italic' : 'normal',
+        color: c.color,
+        textAlign: c.align,
+        lineHeight: c.lineHeight,
+      };
+      const inner: React.CSSProperties = {
+        position: 'absolute',
+        left: CALLOUT_PAD * scale,
+        top: CALLOUT_PAD * scale,
+        width: Math.max(0, c.width - 2 * CALLOUT_PAD) * scale,
+        height: Math.max(0, c.height - tailH - 2 * CALLOUT_PAD) * scale,
+        overflow: 'hidden',
+        pointerEvents: editing ? 'auto' : 'none',
+      };
+      return (
+        <div className="callout-body" style={{ width: c.width * scale, height: c.height * scale }}>
+          <svg className="callout-shape" width={c.width * scale} height={c.height * scale} style={{ overflow: 'visible', pointerEvents: 'none' }}>
+            <path d={pointsToSvgPath(points, closed)} fill={c.fill} stroke={c.stroke ?? 'none'} strokeWidth={(c.stroke ? c.strokeWidth : 0) * scale} strokeLinejoin="round" />
+          </svg>
+          <div style={inner}>
+            {editing ? (
+              <textarea
+                ref={taRef}
+                className="text-edit"
+                style={{ ...textStyle, width: '100%', height: '100%' }}
+                wrap="off"
+                defaultValue={c.text}
+                onChange={(e) => updateElement(pageId, el.id, { text: e.currentTarget.value })}
+                onBlur={onEndEdit}
+                onPointerDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  // Enter adds a line (notes are multi-line); Escape finishes.
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+            ) : (
+              <div className="text-body" style={textStyle}>
+                {c.text || <span className="text-placeholder">Notiz…</span>}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
     case 'highlight': {
       return <div className="fill-body" style={{ background: el.color, mixBlendMode: 'multiply' }} />;
     }
     case 'image':
     case 'signature': {
-      return <img className="img-body" src={el.src} alt="" draggable={false} />;
+      const bw = el.borderWidth ?? 0;
+      const border = el.borderColor && bw > 0 ? `${bw * scale}px ${el.borderStyle ?? 'solid'} ${el.borderColor}` : undefined;
+      return <img className="img-body" style={{ border, boxSizing: 'border-box' }} src={el.src} alt="" draggable={false} />;
     }
     case 'ink': {
       const d = el.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x - el.x) * scale} ${(p.y - el.y) * scale}`).join(' ');

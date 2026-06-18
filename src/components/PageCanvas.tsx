@@ -10,13 +10,18 @@ import {
   registerEmbeddedFont,
   embeddedFontFamily,
   cssStackFor,
+  classifyFont,
   matchCatalogFontKey,
   isGenericFontLabel,
   isInternalFontName,
   BASELINE_RATIO,
+  shapeOutline,
+  pointsToSvgPath,
+  isStrokeOnlyShape,
   type AnyElement,
   type ElementPatch,
   type TextElement,
+  type CalloutElement,
   type TextRun,
 } from '../lib/pdf';
 import { sampleBackground, sampleTextColor, sampleColorAt } from '../lib/utils/color';
@@ -93,10 +98,14 @@ export function PageCanvas() {
   // Scan tool: the line whose font panel is open, plus its sampled colours.
   const [pickedRun, setPickedRun] = useState<number | null>(null);
   const [pickInfo, setPickInfo] = useState<{ color: string; bg: string } | null>(null);
-  // Active alignment guide (a baseline in view-points) shown while moving text.
+  // Active alignment guides (view-points) shown while moving text: a baseline (Y)
+  // and a left-edge (X), so both horizontal and vertical alignment are confirmed.
   const [alignGuideY, setAlignGuideY] = useState<number | null>(null);
-  // Baselines of the last scanned lines, kept across tool switches for snapping.
+  const [alignGuideX, setAlignGuideX] = useState<number | null>(null);
+  // Baselines + left edges of the last scanned lines, kept across tool switches so a
+  // moved text box can snap onto the real letters even after leaving the scan tool.
   const [scanBaselines, setScanBaselines] = useState<number[]>([]);
+  const [scanLeftEdges, setScanLeftEdges] = useState<number[]>([]);
   // Coalesces a burst of arrow-key nudges into a single undo step: the element id
   // whose burst is in progress, and the timer that ends the burst after a pause.
   const nudgeActiveId = useRef<string | null>(null);
@@ -112,7 +121,9 @@ export function PageCanvas() {
     setEditingId(null);
     setPickedRun(null);
     setAlignGuideY(null);
+    setAlignGuideX(null);
     setScanBaselines([]);
+    setScanLeftEdges([]);
   }, [pageId]);
 
   // Fit the page to the available area whenever the page or viewport changes.
@@ -294,8 +305,10 @@ export function PageCanvas() {
         setRuns(lines); // show the clickable boxes immediately
         setPickedRun(null);
         setScanId((n) => n + 1); // replay the scan sweep once per real scan
-        // Remember each line's baseline so a moved text box can snap onto it.
+        // Remember each line's baseline AND left edge so a moved text box can snap
+        // onto the real glyphs (baseline = horizontal, left edge = vertical).
         setScanBaselines(lines.map((l) => l.y + l.fontSize * BASELINE_RATIO));
+        setScanLeftEdges(lines.map((l) => l.x));
 
         // Then inspect each line's font: confirm whether the PDF embeds it (so it
         // can be reused 1:1) and attach the ORIGINAL program when it does. The
@@ -320,7 +333,15 @@ export function PageCanvas() {
           const useReal = !!realName && !isGenericFontLabel(realName) && !isInternalFontName(realName) && (!l.fontLabel || isGenericFontLabel(l.fontLabel));
           const fontLabel = useReal ? realName : (l.fontLabel ?? realName);
           const family = (useReal && matchCatalogFontKey(realName)) || l.family;
-          return { ...l, family, fontLabel, embedded: info?.embedded ?? false, embeddedFontId };
+          // Re-derive weight/style from the font's REAL /BaseFont name, which is
+          // authoritative. pdf.js often reports only a generic "sans-serif" style
+          // for a non-embedded face — so a "Helvetica-Bold" line would lose its bold
+          // flag and be adopted as regular. Classifying the real name fixes that;
+          // we OR with the run's own flags so an already-detected style is never lost.
+          const realStyle = info ? classifyFont(info.rawName) : null;
+          const bold = realStyle ? l.bold || realStyle.bold : l.bold;
+          const italic = realStyle ? l.italic || realStyle.italic : l.italic;
+          return { ...l, family, bold, italic, fontLabel, embedded: info?.embedded ?? false, embeddedFontId };
         });
         if (!cancelled) setRuns(enriched);
       } catch {
@@ -437,6 +458,21 @@ export function PageCanvas() {
     [page, scanBaselines],
   );
 
+  // Left edges a selected text box can snap to (vertical alignment): scanned lines +
+  // other text boxes, so the starts of lists/paragraphs line up to the same column.
+  const getAlignTargetsX = useCallback(
+    (excludeId: string | null): number[] => {
+      const xs = [...scanLeftEdges];
+      if (page) {
+        for (const el of page.elements) {
+          if (el.type === 'text' && el.id !== excludeId) xs.push(el.x);
+        }
+      }
+      return xs;
+    },
+    [page, scanLeftEdges],
+  );
+
   // Arrow keys nudge the selected element pixel-for-pixel for precise placement:
   // each press moves exactly one screen pixel (Shift = 10), independent of the zoom,
   // so a deeply zoomed-in field can be inched into place. A neighbour-baseline guide
@@ -462,12 +498,15 @@ export function PageCanvas() {
       else if (e.key === 'ArrowUp') ny -= step;
       else ny += step;
 
-      // Visual-only alignment hint: show the guide when the (unrotated) text baseline
-      // coincides with a neighbour's, then it vanishes again as you move on.
-      let guide: number | null = null;
+      // Visual-only alignment hints: show a guide when the (unrotated) text baseline or
+      // left edge coincides with a neighbour's, then it vanishes again as you move on.
+      let guideY: number | null = null;
+      let guideX: number | null = null;
       if (target.type === 'text' && !target.rotation) {
-        const near = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
-        if (near != null) guide = near;
+        const nearY = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
+        if (nearY != null) guideY = nearY;
+        const nearX = nearestBaseline(nx, getAlignTargetsX(selId), ALIGN_TOL / scale);
+        if (nearX != null) guideX = nearX;
       }
       // Snapshot once at the start of a burst (or when the target changes) so a
       // single undo reverts the whole run of nudges — matching addElement's model.
@@ -482,17 +521,19 @@ export function PageCanvas() {
         patch.points = target.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
       }
       updateElement(page.id, selId, patch);
-      setAlignGuideY(guide);
-      // End the burst (and clear the guide) after a short pause.
+      setAlignGuideY(guideY);
+      setAlignGuideX(guideX);
+      // End the burst (and clear the guides) after a short pause.
       if (nudgeTimer.current) window.clearTimeout(nudgeTimer.current);
       nudgeTimer.current = window.setTimeout(() => {
         nudgeActiveId.current = null;
         setAlignGuideY(null);
+        setAlignGuideX(null);
       }, 500);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [page, editingId, updateElement, commit, getAlignTargets, scale]);
+  }, [page, editingId, updateElement, commit, getAlignTargets, getAlignTargetsX, scale]);
 
   const evToView = (e: { clientX: number; clientY: number }) => {
     const rect = overlayRef.current!.getBoundingClientRect();
@@ -541,18 +582,22 @@ export function PageCanvas() {
       // the tool defaults, so the field lands here in exactly that font/size/style/colour.
       const ps = pendingTextStyle;
       const size = ps?.size ?? tool.textSize;
+      const lineHeight = ps?.lineHeight ?? 1.3;
+      // Box height = exactly one line, so the rendered glyphs sit centred in it and
+      // the click point can map to the line's true vertical middle.
+      const lineH = size * lineHeight;
       const el: TextElement = {
         id: uid('el'),
         type: 'text',
         // Insert the line exactly where the I-beam sits: the click point becomes the
-        // vertical middle of the first line (not the box top), so text lands on the
-        // line you pointed at instead of dropping below it.
+        // vertical middle of the first line (not the box top), so the typed text
+        // lands precisely where you clicked instead of dropping below it.
         x: start.x,
-        y: start.y - size * 0.5,
+        y: start.y - lineH / 2,
         // Start compact — the field hugs its content and grows as you type (see the
         // editor's auto-fit), instead of the old over-wide, over-long box.
         width: Math.max(size * 3.6, 40),
-        height: Math.max(size * 1.25, 16),
+        height: lineH,
         opacity: 1,
         z: nextZ(page),
         text: '',
@@ -562,7 +607,7 @@ export function PageCanvas() {
         italic: ps?.italic ?? false,
         color: ps?.color ?? tool.textColor,
         align: 'left',
-        lineHeight: ps?.lineHeight ?? 1.3,
+        lineHeight,
         embeddedFontId: ps?.embeddedFontId,
       };
       addElement(page.id, el);
@@ -574,8 +619,40 @@ export function PageCanvas() {
       setEditingId(el.id);
       return;
     }
+    if (activeTool === 'callout') {
+      // Place a speech bubble whose tail points at the click, then edit it right away.
+      e.preventDefault();
+      const w = 172;
+      const h = 96;
+      const el: CalloutElement = {
+        id: uid('el'),
+        type: 'callout',
+        x: Math.max(0, start.x - 22),
+        y: Math.max(0, start.y - h),
+        width: w,
+        height: h,
+        opacity: 1,
+        z: nextZ(page),
+        text: '',
+        family: tool.textFamily,
+        size: 11,
+        bold: false,
+        italic: false,
+        color: '#1d1d1f',
+        align: 'left',
+        lineHeight: 1.3,
+        fill: '#fef3c7',
+        stroke: '#f59e0b',
+        strokeWidth: 1,
+      };
+      addElement(page.id, el);
+      setTool('select');
+      setEditingId(el.id);
+      return;
+    }
     if (activeTool === 'cut') {
-      startCut(start, e);
+      if (tool.cutMode === 'lasso') startCutLasso(start, e);
+      else startCut(start, e);
       return;
     }
     if (activeTool === 'draw') {
@@ -793,27 +870,38 @@ export function PageCanvas() {
   const startShape = (start: { x: number; y: number }, e: React.PointerEvent) => {
     if (!page) return;
     const base = { id: uid('el'), x: start.x, y: start.y, width: 0, height: 0, opacity: 1, z: nextZ(page) };
-    const make = (w: number, h: number, x: number, y: number): AnyElement => {
+    const make = (w: number, h: number, x: number, y: number, flip: boolean): AnyElement => {
       if (activeTool === 'highlight')
         return { ...base, type: 'highlight', x, y, width: w, height: h, opacity: 0.4, color: tool.highlightColor };
       if (activeTool === 'ellipse')
         return { ...base, type: 'ellipse', x, y, width: w, height: h, fill: tool.shapeFill, stroke: tool.shapeStroke, strokeWidth: 1.5 };
       if (activeTool === 'redact')
         return { ...base, type: 'rect', x, y, width: w, height: h, fill: '#000000', stroke: null, strokeWidth: 0, radius: 0 };
+      if (activeTool === 'shape') {
+        const kind = tool.shapeKind;
+        const strokeOnly = isStrokeOnlyShape(kind);
+        return { ...base, type: 'shape', x, y, width: w, height: h, shape: kind, fill: strokeOnly ? null : tool.shapeFill, stroke: tool.shapeStroke, strokeWidth: strokeOnly ? 2 : 1.5, dash: 'solid', flip };
+      }
       return { ...base, type: 'rect', x, y, width: w, height: h, fill: tool.shapeFill, stroke: tool.shapeStroke, strokeWidth: 1.5, radius: 0 };
     };
     const move = (ev: PointerEvent) => {
       const p = evToView(ev);
       const x = Math.min(start.x, p.x);
       const y = Math.min(start.y, p.y);
-      setDraft(make(Math.abs(p.x - start.x), Math.abs(p.y - start.y), x, y));
+      const flip = (p.x - start.x) * (p.y - start.y) < 0; // dragged ↗ / ↙
+      setDraft(make(Math.abs(p.x - start.x), Math.abs(p.y - start.y), x, y, flip));
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       setDraft((d) => {
-        if (d && d.width > 4 && d.height > 4) {
-          addElement(page.id, d);
+        if (!d) return null;
+        // A line only needs length in one axis; give it a selectable thickness.
+        const isLine = d.type === 'shape' && d.shape === 'line';
+        const ok = isLine ? Math.max(d.width, d.height) > 6 : d.width > 4 && d.height > 4;
+        if (ok) {
+          const el = isLine ? { ...d, width: Math.max(d.width, 1), height: Math.max(d.height, 1) } : d;
+          addElement(page.id, el);
           setTool('select');
         }
         return null;
@@ -906,6 +994,120 @@ export function PageCanvas() {
     } catch {
       return null;
     }
+  };
+
+  // ── lasso variant of the cut tool: trace any shape with the mouse held down, and
+  // lift a 1:1 copy clipped to exactly that outline (transparent outside). ──
+  const startCutLasso = (start: { x: number; y: number }, e: React.PointerEvent) => {
+    if (!page) return;
+    const pts: { x: number; y: number }[] = [start];
+    const bounds = () => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const p of pts) {
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      return { minX, minY, maxX, maxY };
+    };
+    const move = (ev: PointerEvent) => {
+      pts.push(evToView(ev));
+      const b = bounds();
+      setDraft({
+        id: 'draft-lasso',
+        type: 'ink',
+        x: b.minX,
+        y: b.minY,
+        width: Math.max(1, b.maxX - b.minX),
+        height: Math.max(1, b.maxY - b.minY),
+        opacity: 1,
+        z: nextZ(page),
+        points: [...pts],
+        color: 'var(--accent)',
+        strokeWidth: 1.5 / scale,
+        dash: 'dashed',
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setDraft(null);
+      if (pts.length > 2) void cutRegionLasso(pts);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  };
+
+  // Clip a captured region PNG to a lasso polygon (keeps only the interior).
+  const maskToPolygon = (src: string, pts: { x: number; y: number }[], vx: number, vy: number, vw: number, vh: number): Promise<string | null> =>
+    new Promise((resolve) => {
+      const im = new Image();
+      im.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = im.width;
+        c.height = im.height;
+        const ctx = c.getContext('2d');
+        if (!ctx) return resolve(null);
+        ctx.drawImage(im, 0, 0);
+        const sx = im.width / vw;
+        const sy = im.height / vh;
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.beginPath();
+        pts.forEach((p, i) => {
+          const x = (p.x - vx) * sx;
+          const y = (p.y - vy) * sy;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.closePath();
+        ctx.fill();
+        try {
+          resolve(c.toDataURL('image/png'));
+        } catch {
+          resolve(null);
+        }
+      };
+      im.onerror = () => resolve(null);
+      im.src = src;
+    });
+
+  const cutRegionLasso = async (pts: { x: number; y: number }[]) => {
+    if (!page) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of pts) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    const vx = Math.max(0, minX);
+    const vy = Math.max(0, minY);
+    const vw = Math.min(view.width, maxX) - vx;
+    const vh = Math.min(view.height, maxY) - vy;
+    if (vw <= 2 || vh <= 2) {
+      showToast('Bereich ist zu klein.', 'error');
+      return;
+    }
+    const src = (await captureRegionHiRes(vx, vy, vw, vh)) ?? captureRegionFromScreen(vx, vy, vw, vh);
+    if (!src) {
+      showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
+      return;
+    }
+    const masked = await maskToPolygon(src, pts, vx, vy, vw, vh);
+    if (!masked) {
+      showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
+      return;
+    }
+    addElement(page.id, { id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh, opacity: 1, z: nextZ(page), src: masked, aspect: vw / vh });
+    setTool('select');
   };
 
   const cutRegion = async (x: number, y: number, w: number, h: number) => {
@@ -1013,9 +1215,14 @@ export function PageCanvas() {
   // dropped when the user clicks an empty spot (see onOverlayPointerDown).
   const endTextEdit = () => setEditingId(null);
 
-  /** An empty, never-filled new text box (not an in-place edit, which keeps its cover). */
-  const isAbandonedText = (el: AnyElement | undefined): boolean =>
-    !!el && el.type === 'text' && !el.text.trim() && !el.coverColor;
+  /** An empty, never-filled new text box or callout (not an in-place edit, which keeps
+   *  its cover) — dropped when the user clicks away without typing anything. */
+  const isAbandonedText = (el: AnyElement | undefined): boolean => {
+    if (!el) return false;
+    if (el.type === 'text') return !el.text.trim() && !el.coverColor;
+    if (el.type === 'callout') return !el.text.trim();
+    return false;
+  };
 
   // ── scan tool: inspect a detected line, then adopt its exact typeface ──
   // Sample the line's real text colour and the page background directly from the
@@ -1112,7 +1319,9 @@ export function PageCanvas() {
               interactive={activeTool === 'select' || editingId === el.id || (activeTool === 'edit-text' && el.type === 'text')}
               editTextMode={activeTool === 'edit-text'}
               alignBaselines={getAlignTargets(el.id)}
+              alignXs={getAlignTargetsX(el.id)}
               onAlignGuide={setAlignGuideY}
+              onAlignGuideX={setAlignGuideX}
               onStartEdit={() => startEditElement(el.id)}
               onEndEdit={endTextEdit}
               updateElement={updateElement}
@@ -1122,8 +1331,10 @@ export function PageCanvas() {
 
           {draft && <DraftView el={draft} scale={scale} />}
 
-          {/* Alignment guide: appears only while a text baseline sits exactly on a neighbour's. */}
+          {/* Alignment guides: horizontal lights up on a shared baseline, vertical on a
+              shared left edge — pure confirmation of the snap that just engaged. */}
           {alignGuideY != null && <div className="align-guide" style={{ top: alignGuideY * scale }} />}
+          {alignGuideX != null && <div className="align-guide-v" style={{ left: alignGuideX * scale }} />}
 
           {activeTool === 'edit-text' && (
             <>
@@ -1196,6 +1407,21 @@ function DraftView({ el, scale }: { el: AnyElement; scale: number }) {
   if (el.type === 'ellipse') return <div className="draft" style={{ ...style, borderRadius: '50%', border: `1.5px solid ${el.stroke ?? '#111'}`, background: el.fill ?? 'transparent' }} />;
   if (el.type === 'highlight') return <div className="draft" style={{ ...style, background: el.color, mixBlendMode: 'multiply' }} />;
   if (el.type === 'rect') return <div className="draft" style={{ ...style, border: el.stroke ? `1.5px solid ${el.stroke}` : 'none', background: el.fill ?? 'transparent' }} />;
+  if (el.type === 'shape') {
+    const { points, closed } = shapeOutline(el.shape, 0, 0, el.width * scale, el.height * scale, el.flip ?? false);
+    return (
+      <svg className="draft" style={{ left: el.x * scale, top: el.y * scale, width: el.width * scale, height: el.height * scale }}>
+        <path
+          d={pointsToSvgPath(points, closed)}
+          fill={isStrokeOnlyShape(el.shape) ? 'none' : el.fill ?? 'none'}
+          stroke={el.stroke ?? 'none'}
+          strokeWidth={el.strokeWidth * scale}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
   return <div className="draft" style={style} />;
 }
 

@@ -309,11 +309,21 @@ function BgEditor({ el, onApply, onClose, onError }: { el: ImageElement; onApply
   // Magic-wand: remove the connected region, reachable from the image edges, whose
   // colour stays within tolerance of the (averaged) border colour.
   const auto = () => {
+    if (busy || !baseData.current || !mask.current) return;
+    pushHistory();
+    setBusy(true);
+    // Defer the synchronous flood-fill one frame so the button paints its disabled/
+    // busy state first (the fill blocks the main thread for large images).
+    requestAnimationFrame(() => runAuto());
+  };
+
+  const runAuto = () => {
     const base = baseData.current;
     const m = mask.current;
-    if (!base || !m) return;
-    setBusy(true);
-    pushHistory();
+    if (!base || !m) {
+      setBusy(false);
+      return;
+    }
     const { w, h } = work.current;
     const d = base.data;
     // averaged border colour as the background reference
@@ -408,7 +418,9 @@ function BgEditor({ el, onApply, onClose, onError }: { el: ImageElement; onApply
 
   const startPaint = (e: React.PointerEvent) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    // Ignore strokes until the image has loaded (disp.w drives the brush-radius scale;
+    // painting before load would divide by zero).
+    if (!canvas || !ready || disp.w === 0 || !mask.current) return;
     e.preventDefault();
     pushHistory();
     const { w, h } = work.current;

@@ -26,6 +26,9 @@ export function Workspace() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // While a modal editor owns the keyboard, suspend global shortcuts so e.g. undo
+      // can't mutate the page underneath the open image editor.
+      if (useStore.getState().imageEditor || useUI.getState().signatureOpen) return;
       const t = e.target as HTMLElement;
       const typing = t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
       const mod = e.metaKey || e.ctrlKey;

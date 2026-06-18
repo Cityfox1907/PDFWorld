@@ -261,6 +261,7 @@ export class Baker {
       family: el.family,
       bold: el.bold,
       italic: el.italic,
+      clip: true,
     });
   }
 
@@ -335,26 +336,31 @@ export class Baker {
       opacity: el.opacity,
     });
     // Optional decorative border, drawn as the box outline so dashed/dotted styles
-    // and free rotation all compose like the other vector elements.
-    if (el.borderColor && (el.borderWidth ?? 0) > 0) {
+    // and free rotation all compose like the other vector elements. The outline is
+    // inset by half the stroke width so the border sits *inside* the box edge,
+    // matching the on-screen CSS border (box-sizing: border-box). Round caps are
+    // required for the dotted pattern (a zero-length dash) to render as dots.
+    const bw = el.borderWidth ?? 0;
+    if (el.borderColor && bw > 0) {
       const rot = el.rotation ?? 0;
       const cx = el.x + el.width / 2;
       const cy = el.y + el.height / 2;
+      const inset = bw / 2;
       const corners: Pt[] = [
-        { x: el.x, y: el.y },
-        { x: el.x + el.width, y: el.y },
-        { x: el.x + el.width, y: el.y + el.height },
-        { x: el.x, y: el.y + el.height },
+        { x: el.x + inset, y: el.y + inset },
+        { x: el.x + el.width - inset, y: el.y + inset },
+        { x: el.x + el.width - inset, y: el.y + el.height - inset },
+        { x: el.x + inset, y: el.y + el.height - inset },
       ];
       const d = this.pathFromPoints(corners, true, rot, cx, cy, toPdfPoint);
       page.drawSvgPath(d, {
         x: 0,
         y: 0,
         borderColor: rgbColor(el.borderColor),
-        borderWidth: el.borderWidth,
+        borderWidth: bw,
         borderOpacity: el.opacity,
-        borderDashArray: dashArrayFor(el.borderStyle, el.borderWidth ?? 1),
-        borderLineCap: LineCapStyle.Butt,
+        borderDashArray: dashArrayFor(el.borderStyle, bw),
+        borderLineCap: LineCapStyle.Round,
       });
     }
   }
@@ -470,28 +476,34 @@ export class Baker {
       }
     };
 
+    const measureFont = unicodeFont ?? stdFont;
     let num = 0;
     for (let i = 0; i < rawLines.length; i++) {
       const raw = rawLines[i];
+      // Clip overflowing lines to the box (callouts have a fixed bubble height, so the
+      // export must match the on-screen `overflow:hidden`; text fields auto-grow, so
+      // they pass clip=false and nothing is dropped).
+      if (o.clip && i * o.size * o.lineHeight + o.size > o.height) break;
       const baselineY = o.y + i * o.size * o.lineHeight + o.size * ASCENT_RATIO;
       if (list) {
         num++;
         const marker = list === 'bullet' ? '•' : `${num}.`;
         // Right-align the marker just left of the text column (hanging in the margin),
-        // exactly like the on-screen marker column, so screen and export agree.
+        // exactly like the on-screen marker column, so screen and export agree. Measure
+        // with the SAME font the marker is drawn in, or it lands off-column.
         let mw = o.size * 0.5;
         try {
-          mw = stdFont.widthOfTextAtSize(marker, o.size);
+          mw = measureFont.widthOfTextAtSize(marker, o.size);
         } catch {
           /* keep the estimate */
         }
         drawAt(o.x - markerGap - mw, baselineY, marker);
         if (raw) {
-          const x0 = lineX(o.x, o.width, raw, o.align, unicodeFont ?? stdFont, o.size);
+          const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size);
           drawAt(x0, baselineY, raw);
         }
       } else if (raw) {
-        const x0 = lineX(o.x, o.width, raw, o.align, unicodeFont ?? stdFont, o.size);
+        const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size);
         drawAt(x0, baselineY, raw);
       }
     }
@@ -519,6 +531,8 @@ interface TextBlockOptions {
   italic: boolean;
   embeddedFontId?: string;
   list?: 'none' | 'bullet' | 'number';
+  /** clip lines that don't fit the box height (fixed-height callouts; off for text). */
+  clip?: boolean;
 }
 
 /** Left edge of a line given alignment, measured with the active font. */

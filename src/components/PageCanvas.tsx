@@ -1215,9 +1215,14 @@ export function PageCanvas() {
   // dropped when the user clicks an empty spot (see onOverlayPointerDown).
   const endTextEdit = () => setEditingId(null);
 
-  /** An empty, never-filled new text box (not an in-place edit, which keeps its cover). */
-  const isAbandonedText = (el: AnyElement | undefined): boolean =>
-    !!el && el.type === 'text' && !el.text.trim() && !el.coverColor;
+  /** An empty, never-filled new text box or callout (not an in-place edit, which keeps
+   *  its cover) — dropped when the user clicks away without typing anything. */
+  const isAbandonedText = (el: AnyElement | undefined): boolean => {
+    if (!el) return false;
+    if (el.type === 'text') return !el.text.trim() && !el.coverColor;
+    if (el.type === 'callout') return !el.text.trim();
+    return false;
+  };
 
   // ── scan tool: inspect a detected line, then adopt its exact typeface ──
   // Sample the line's real text colour and the page background directly from the

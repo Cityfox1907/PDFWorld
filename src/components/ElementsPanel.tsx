@@ -8,6 +8,8 @@ import {
   Type,
   Square,
   Circle,
+  Shapes,
+  MessageSquare,
   Highlighter,
   Pencil,
   Image as ImageIcon,
@@ -33,6 +35,14 @@ function elementLabel(el: AnyElement): string {
       return el.fill === '#000000' && !el.stroke ? 'Schwärzung' : 'Rechteck';
     case 'ellipse':
       return 'Ellipse';
+    case 'shape': {
+      const names: Record<string, string> = { triangle: 'Dreieck', diamond: 'Raute', star: 'Stern', arrow: 'Pfeil', line: 'Linie' };
+      return names[el.shape] ?? 'Form';
+    }
+    case 'callout': {
+      const t = el.text.trim().replace(/\s+/g, ' ');
+      return t ? `Sprechblase: ${t.slice(0, 32)}` : 'Sprechblase';
+    }
     case 'highlight':
       return 'Markierung';
     case 'ink':
@@ -52,6 +62,10 @@ function elementIcon(el: AnyElement): LucideIcon {
       return Square;
     case 'ellipse':
       return Circle;
+    case 'shape':
+      return Shapes;
+    case 'callout':
+      return MessageSquare;
     case 'highlight':
       return Highlighter;
     case 'ink':

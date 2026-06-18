@@ -8,6 +8,7 @@ import {
   type ElementPatch,
   type FormField,
   type FontFamilyKey,
+  type ShapeKind,
 } from '../lib/pdf';
 import { readFileBytes } from '../lib/utils/file';
 import { uid } from '../lib/utils/id';
@@ -17,12 +18,14 @@ export type ToolId =
   | 'select'
   | 'edit-text'
   | 'text'
+  | 'callout'
   | 'cut'
   | 'brush'
   | 'highlight'
   | 'draw'
   | 'rect'
   | 'ellipse'
+  | 'shape'
   | 'redact'
   | 'image'
   | 'signature';
@@ -65,6 +68,10 @@ export interface ToolDefaults {
   drawDash: 'solid' | 'dashed' | 'dotted';
   shapeFill: string;
   shapeStroke: string;
+  /** which vector shape the "Elemente" → shape tool draws */
+  shapeKind: ShapeKind;
+  /** region tool ("Ausschneiden") shape: a rectangle marquee or a freehand lasso */
+  cutMode: 'rect' | 'lasso';
   /** background brush shape: a freehand stroke, or a borderless filled rectangle */
   brushMode: 'brush' | 'rect';
   /** width of the background cover brush, in view points */
@@ -122,6 +129,8 @@ interface StoreState {
   clipboard: AnyElement | null;
   /** A typeface armed from the scan panel; the next click places a field in it. */
   pendingTextStyle: PendingTextStyle | null;
+  /** Open image editor (crop / background removal), targeting an image element. */
+  imageEditor: { id: string; mode: 'crop' | 'bg' } | null;
 
   past: Snapshot[];
   future: Snapshot[];
@@ -144,6 +153,9 @@ interface StoreState {
   addRecentColor: (color: string) => void;
   /** Arm (or clear) the typeface that the next page click writes in. */
   setPendingTextStyle: (style: PendingTextStyle | null) => void;
+  /** Open / close the image editor (crop or background removal) for an element. */
+  openImageEditor: (id: string, mode: 'crop' | 'bg') => void;
+  closeImageEditor: () => void;
 
   // ── elements ──
   addElement: (pageId: string, el: AnyElement) => void;
@@ -195,6 +207,8 @@ const DEFAULT_TOOL: ToolDefaults = {
   drawDash: 'solid',
   shapeFill: '#ffffff',
   shapeStroke: '#111111',
+  shapeKind: 'triangle',
+  cutMode: 'rect',
   brushMode: 'brush',
   brushWidth: 18,
   brushColor: '#ffffff',
@@ -242,6 +256,7 @@ export const useStore = create<StoreState>((set, get) => ({
   recentColors: [],
   clipboard: null,
   pendingTextStyle: null,
+  imageEditor: null,
 
   past: [],
   future: [],
@@ -379,6 +394,12 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setPendingTextStyle(style) {
     set({ pendingTextStyle: style });
+  },
+  openImageEditor(id, mode) {
+    set({ imageEditor: { id, mode }, selectedElementId: id });
+  },
+  closeImageEditor() {
+    set({ imageEditor: null });
   },
 
   addElement(pageId, el) {

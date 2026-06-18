@@ -1,6 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { cssStackFor, embeddedFontFamily, BASELINE_RATIO, type AnyElement, type ElementPatch, type TextElement, type InkElement } from '../lib/pdf';
+import {
+  cssStackFor,
+  embeddedFontFamily,
+  shapeOutline,
+  calloutOutline,
+  calloutTailHeight,
+  pointsToSvgPath,
+  isStrokeOnlyShape,
+  CALLOUT_PAD,
+  BASELINE_RATIO,
+  type AnyElement,
+  type ElementPatch,
+  type TextElement,
+  type ShapeElement,
+  type CalloutElement,
+  type InkElement,
+} from '../lib/pdf';
 import { nearestBaseline } from '../lib/utils/align';
 import { inkDashArray } from '../lib/utils/ink';
 import { Lock, Unlock } from 'lucide-react';
@@ -190,7 +206,7 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       className={`el ${selected ? 'selected' : ''} ${locked ? 'locked' : ''}`}
       style={base}
       onPointerDown={startMove}
-      onDoubleClick={() => el.type === 'text' && interactive && !locked && onStartEdit()}
+      onDoubleClick={() => (el.type === 'text' || el.type === 'callout') && interactive && !locked && onStartEdit()}
     >
       <ElementBody el={el} scale={scale} editing={editing} onEndEdit={onEndEdit} updateElement={updateElement} pageId={pageId} />
       {selected && !editing && !locked && (
@@ -248,7 +264,8 @@ function ElementBody({
       // Pre-select the content so existing text turns blue and a single keystroke
       // replaces it — the caret is instantly ready for new fields too.
       taRef.current.select();
-      fitToContent(taRef.current);
+      // Only plain text fields auto-grow; a callout keeps its drawn bubble size.
+      if (el.type === 'text') fitToContent(taRef.current);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
@@ -330,12 +347,86 @@ function ElementBody({
         />
       );
     }
+    case 'shape': {
+      const s = el as ShapeElement;
+      const { points, closed } = shapeOutline(s.shape, 0, 0, s.width * scale, s.height * scale, s.flip ?? false);
+      return (
+        <svg className="shape-body" width={s.width * scale} height={s.height * scale} style={{ overflow: 'visible', pointerEvents: 'none' }}>
+          <path
+            d={pointsToSvgPath(points, closed)}
+            fill={isStrokeOnlyShape(s.shape) ? 'none' : s.fill ?? 'none'}
+            stroke={s.stroke ?? 'none'}
+            strokeWidth={(s.stroke ? s.strokeWidth : 0) * scale}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            strokeDasharray={s.stroke ? inkDashArray(s.dash, s.strokeWidth * scale) : undefined}
+          />
+        </svg>
+      );
+    }
+    case 'callout': {
+      const c = el as CalloutElement;
+      const { points, closed } = calloutOutline(0, 0, c.width * scale, c.height * scale);
+      const tailH = calloutTailHeight(c.height);
+      const textStyle: React.CSSProperties = {
+        fontFamily: cssStackFor(c.family),
+        fontSize: c.size * scale,
+        fontWeight: c.bold ? 700 : 400,
+        fontStyle: c.italic ? 'italic' : 'normal',
+        color: c.color,
+        textAlign: c.align,
+        lineHeight: c.lineHeight,
+      };
+      const inner: React.CSSProperties = {
+        position: 'absolute',
+        left: CALLOUT_PAD * scale,
+        top: CALLOUT_PAD * scale,
+        width: Math.max(0, c.width - 2 * CALLOUT_PAD) * scale,
+        height: Math.max(0, c.height - tailH - 2 * CALLOUT_PAD) * scale,
+        overflow: 'hidden',
+        pointerEvents: editing ? 'auto' : 'none',
+      };
+      return (
+        <div className="callout-body" style={{ width: c.width * scale, height: c.height * scale }}>
+          <svg className="callout-shape" width={c.width * scale} height={c.height * scale} style={{ overflow: 'visible', pointerEvents: 'none' }}>
+            <path d={pointsToSvgPath(points, closed)} fill={c.fill} stroke={c.stroke ?? 'none'} strokeWidth={(c.stroke ? c.strokeWidth : 0) * scale} strokeLinejoin="round" />
+          </svg>
+          <div style={inner}>
+            {editing ? (
+              <textarea
+                ref={taRef}
+                className="text-edit"
+                style={{ ...textStyle, width: '100%', height: '100%' }}
+                wrap="off"
+                defaultValue={c.text}
+                onChange={(e) => updateElement(pageId, el.id, { text: e.currentTarget.value })}
+                onBlur={onEndEdit}
+                onPointerDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  // Enter adds a line (notes are multi-line); Escape finishes.
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+            ) : (
+              <div className="text-body" style={textStyle}>
+                {c.text || <span className="text-placeholder">Notiz…</span>}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
     case 'highlight': {
       return <div className="fill-body" style={{ background: el.color, mixBlendMode: 'multiply' }} />;
     }
     case 'image':
     case 'signature': {
-      return <img className="img-body" src={el.src} alt="" draggable={false} />;
+      const bw = el.borderWidth ?? 0;
+      const border = el.borderColor && bw > 0 ? `${bw * scale}px ${el.borderStyle ?? 'solid'} ${el.borderColor}` : undefined;
+      return <img className="img-body" style={{ border, boxSizing: 'border-box' }} src={el.src} alt="" draggable={false} />;
     }
     case 'ink': {
       const d = el.points.map((p, i) => `${i === 0 ? 'M' : 'L'}${(p.x - el.x) * scale} ${(p.y - el.y) * scale}`).join(' ');

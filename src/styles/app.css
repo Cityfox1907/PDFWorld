@@ -322,6 +322,83 @@
   flex: 1;
 }
 
+/* ── ELEMENTS (shapes) FLYOUT ── */
+.rail-menu {
+  position: relative;
+  display: flex;
+}
+.rail-flyout {
+  position: absolute;
+  left: 52px;
+  top: 0;
+  z-index: 50;
+  width: 168px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  animation: pop 0.16s var(--ease);
+}
+.rail-flyout-head {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-3);
+  padding: 4px 6px 8px;
+}
+.rail-flyout-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rail-flyout-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.rail-flyout-item:hover {
+  background: var(--bg-elevated);
+}
+.rail-flyout-item.active {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+/* Shape-kind switcher inside the inspector (a compact row of icon buttons). */
+.shape-kind-grid {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+.shape-kind-btn {
+  flex: 1;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-2);
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.shape-kind-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.shape-kind-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* ── PAGE SIDEBAR ── */
 .sidebar {
   width: 206px;
@@ -1684,4 +1761,112 @@ svg.draft {
   font-size: 11px;
   color: var(--text-3);
   text-align: center;
+}
+
+/* ── IMAGE EDITOR (crop + background removal) ── */
+.imgedit-modal {
+  width: auto;
+  max-width: min(960px, calc(100vw - 32px));
+}
+.imgedit-stage {
+  position: relative;
+  margin: 0 auto;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--line);
+  touch-action: none;
+}
+.imgedit-img,
+.imgedit-canvas {
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* Transparent-aware checkerboard behind the background-removal preview. */
+.checker {
+  background-image:
+    linear-gradient(45deg, #c9c9cf 25%, transparent 25%, transparent 75%, #c9c9cf 75%),
+    linear-gradient(45deg, #c9c9cf 25%, transparent 25%, transparent 75%, #c9c9cf 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 9px 9px;
+  background-color: #fff;
+}
+.imgedit-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.crop-box {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  border: 1px solid #fff;
+  cursor: move;
+}
+.crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  z-index: 2;
+}
+.crop-handle.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.crop-handle.n { left: calc(50% - 6px); top: -6px; cursor: ns-resize; }
+.crop-handle.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.crop-handle.e { right: -6px; top: calc(50% - 6px); cursor: ew-resize; }
+.crop-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.crop-handle.s { left: calc(50% - 6px); bottom: -6px; cursor: ns-resize; }
+.crop-handle.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.crop-handle.w { left: -6px; top: calc(50% - 6px); cursor: ew-resize; }
+.imgedit-bg {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.imgedit-tools {
+  width: 248px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+.imgedit-tools .divider {
+  margin: 4px 0;
+}
+.imgedit-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.imgedit-field label {
+  font-size: 12px;
+  color: var(--text-2);
+  min-width: 56px;
+}
+.imgedit-field input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.imgedit-tool-row {
+  display: flex;
+  gap: 8px;
+}
+.imgedit-tool-row .btn {
+  flex: 1;
+}
+@media (max-width: 720px) {
+  .imgedit-bg {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .imgedit-tools {
+    width: 100%;
+  }
 }

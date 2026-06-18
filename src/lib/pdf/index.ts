@@ -34,6 +34,8 @@ export {
 export type { FontDef } from './fontCatalog';
 export { registerEmbeddedFont, embeddedFontFamily, getEmbeddedFont } from './embeddedFonts';
 export type { EmbeddedFont } from './embeddedFonts';
+export { shapeOutline, calloutOutline, calloutTailHeight, pointsToSvgPath, isStrokeOnlyShape, CALLOUT_PAD } from './shapes';
+export type { Pt } from './shapes';
 export { readFields, applyFieldValues, finalizeForm, hasForm, formDiagnostics } from './forms';
 export {
   loadPdfjs,

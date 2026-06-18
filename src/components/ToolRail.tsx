@@ -1,8 +1,8 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore, visibleSize } from '../state/store';
 import { useUI } from '../state/ui';
 import type { ToolId } from '../state/store';
-import type { ImageElement } from '../lib/pdf';
+import type { ImageElement, ShapeKind } from '../lib/pdf';
 import { uid } from '../lib/utils/id';
 import {
   MousePointer2,
@@ -14,6 +14,12 @@ import {
   Pencil,
   Square,
   Circle,
+  Triangle,
+  Diamond,
+  Star,
+  ArrowRight,
+  Minus,
+  Shapes,
   Eraser,
   ImagePlus,
   PenTool,
@@ -28,6 +34,7 @@ interface ToolDef {
   key?: string;
 }
 
+// Tools above the "Elemente" shapes menu.
 const TOP: ToolDef[] = [
   { id: 'select', icon: MousePointer2, label: 'Auswählen', key: 'V' },
   { id: 'edit-text', icon: ScanText, label: 'Text scannen & bearbeiten', key: 'E' },
@@ -36,10 +43,89 @@ const TOP: ToolDef[] = [
   { id: 'brush', icon: Paintbrush, label: 'Hintergrund-Pinsel', key: 'C' },
   { id: 'highlight', icon: Highlighter, label: 'Markieren', key: 'H' },
   { id: 'draw', icon: Pencil, label: 'Zeichnen', key: 'D' },
-  { id: 'rect', icon: Square, label: 'Rechteck', key: 'R' },
-  { id: 'ellipse', icon: Circle, label: 'Ellipse', key: 'O' },
-  { id: 'redact', icon: Eraser, label: 'Schwärzen', key: 'B' },
 ];
+
+/** A shape choice inside the "Elemente" menu. Rectangle and ellipse keep their own
+ *  element types; the rest are drawn as generic vector shapes (see shapes.ts). */
+interface ShapeChoice {
+  tool: ToolId;
+  shapeKind?: ShapeKind;
+  icon: LucideIcon;
+  label: string;
+}
+const SHAPES: ShapeChoice[] = [
+  { tool: 'rect', icon: Square, label: 'Rechteck' },
+  { tool: 'ellipse', icon: Circle, label: 'Ellipse' },
+  { tool: 'shape', shapeKind: 'triangle', icon: Triangle, label: 'Dreieck' },
+  { tool: 'shape', shapeKind: 'diamond', icon: Diamond, label: 'Raute' },
+  { tool: 'shape', shapeKind: 'star', icon: Star, label: 'Stern' },
+  { tool: 'shape', shapeKind: 'arrow', icon: ArrowRight, label: 'Pfeil' },
+  { tool: 'shape', shapeKind: 'line', icon: Minus, label: 'Linie' },
+];
+
+function ElementsMenu() {
+  const activeTool = useStore((s) => s.activeTool);
+  const setTool = useStore((s) => s.setTool);
+  const setToolDefaults = useStore((s) => s.setToolDefaults);
+  const shapeKind = useStore((s) => s.tool.shapeKind);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const isShapeTool = activeTool === 'rect' || activeTool === 'ellipse' || activeTool === 'shape';
+  const pick = (s: ShapeChoice) => {
+    if (s.shapeKind) setToolDefaults({ shapeKind: s.shapeKind });
+    setTool(s.tool);
+    setOpen(false);
+  };
+
+  return (
+    <div className="rail-menu" ref={ref}>
+      <button
+        className={`rail-btn ${isShapeTool ? 'active' : ''}`}
+        onClick={() => setOpen((o) => !o)}
+        title="Elemente · Formen einfügen"
+      >
+        <Shapes size={19} />
+        <span className="rail-tip">Elemente</span>
+      </button>
+      {open && (
+        <div className="rail-flyout">
+          <div className="rail-flyout-head">Elemente</div>
+          <div className="rail-flyout-grid">
+            {SHAPES.map((s) => {
+              const active = s.tool === 'shape' ? activeTool === 'shape' && shapeKind === s.shapeKind : activeTool === s.tool;
+              return (
+                <button
+                  key={s.label}
+                  className={`rail-flyout-item ${active ? 'active' : ''}`}
+                  onClick={() => pick(s)}
+                  title={s.label}
+                >
+                  <s.icon size={18} />
+                  <span>{s.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ToolRail() {
   const activeTool = useStore((s) => s.activeTool);
@@ -101,6 +187,17 @@ export function ToolRail() {
           <span className="rail-tip">{t.label}</span>
         </button>
       ))}
+
+      <ElementsMenu />
+
+      <button
+        className={`rail-btn ${activeTool === 'redact' ? 'active' : ''}`}
+        onClick={() => setTool('redact')}
+        title="Schwärzen · B"
+      >
+        <Eraser size={19} />
+        <span className="rail-tip">Schwärzen</span>
+      </button>
 
       <div className="rail-sep" />
 

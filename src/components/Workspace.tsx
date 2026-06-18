@@ -8,6 +8,7 @@ import { ElementsPanel } from './ElementsPanel';
 import { PageCanvas } from './PageCanvas';
 import { Inspector } from './Inspector';
 import { SignatureModal } from './SignatureModal';
+import { ImageEditorModal } from './ImageEditor';
 import { SaveDialog } from './SaveDialog';
 import { PageOrganizer } from './PageOrganizer';
 
@@ -107,6 +108,7 @@ export function Workspace() {
         <Inspector />
       </div>
       <SignatureModal />
+      <ImageEditorModal />
       <SaveDialog />
       <PageOrganizer />
     </div>

@@ -10,6 +10,7 @@ import {
   registerEmbeddedFont,
   embeddedFontFamily,
   cssStackFor,
+  classifyFont,
   matchCatalogFontKey,
   isGenericFontLabel,
   isInternalFontName,
@@ -93,10 +94,14 @@ export function PageCanvas() {
   // Scan tool: the line whose font panel is open, plus its sampled colours.
   const [pickedRun, setPickedRun] = useState<number | null>(null);
   const [pickInfo, setPickInfo] = useState<{ color: string; bg: string } | null>(null);
-  // Active alignment guide (a baseline in view-points) shown while moving text.
+  // Active alignment guides (view-points) shown while moving text: a baseline (Y)
+  // and a left-edge (X), so both horizontal and vertical alignment are confirmed.
   const [alignGuideY, setAlignGuideY] = useState<number | null>(null);
-  // Baselines of the last scanned lines, kept across tool switches for snapping.
+  const [alignGuideX, setAlignGuideX] = useState<number | null>(null);
+  // Baselines + left edges of the last scanned lines, kept across tool switches so a
+  // moved text box can snap onto the real letters even after leaving the scan tool.
   const [scanBaselines, setScanBaselines] = useState<number[]>([]);
+  const [scanLeftEdges, setScanLeftEdges] = useState<number[]>([]);
   // Coalesces a burst of arrow-key nudges into a single undo step: the element id
   // whose burst is in progress, and the timer that ends the burst after a pause.
   const nudgeActiveId = useRef<string | null>(null);
@@ -112,7 +117,9 @@ export function PageCanvas() {
     setEditingId(null);
     setPickedRun(null);
     setAlignGuideY(null);
+    setAlignGuideX(null);
     setScanBaselines([]);
+    setScanLeftEdges([]);
   }, [pageId]);
 
   // Fit the page to the available area whenever the page or viewport changes.
@@ -294,8 +301,10 @@ export function PageCanvas() {
         setRuns(lines); // show the clickable boxes immediately
         setPickedRun(null);
         setScanId((n) => n + 1); // replay the scan sweep once per real scan
-        // Remember each line's baseline so a moved text box can snap onto it.
+        // Remember each line's baseline AND left edge so a moved text box can snap
+        // onto the real glyphs (baseline = horizontal, left edge = vertical).
         setScanBaselines(lines.map((l) => l.y + l.fontSize * BASELINE_RATIO));
+        setScanLeftEdges(lines.map((l) => l.x));
 
         // Then inspect each line's font: confirm whether the PDF embeds it (so it
         // can be reused 1:1) and attach the ORIGINAL program when it does. The
@@ -320,7 +329,15 @@ export function PageCanvas() {
           const useReal = !!realName && !isGenericFontLabel(realName) && !isInternalFontName(realName) && (!l.fontLabel || isGenericFontLabel(l.fontLabel));
           const fontLabel = useReal ? realName : (l.fontLabel ?? realName);
           const family = (useReal && matchCatalogFontKey(realName)) || l.family;
-          return { ...l, family, fontLabel, embedded: info?.embedded ?? false, embeddedFontId };
+          // Re-derive weight/style from the font's REAL /BaseFont name, which is
+          // authoritative. pdf.js often reports only a generic "sans-serif" style
+          // for a non-embedded face — so a "Helvetica-Bold" line would lose its bold
+          // flag and be adopted as regular. Classifying the real name fixes that;
+          // we OR with the run's own flags so an already-detected style is never lost.
+          const realStyle = info ? classifyFont(info.rawName) : null;
+          const bold = realStyle ? l.bold || realStyle.bold : l.bold;
+          const italic = realStyle ? l.italic || realStyle.italic : l.italic;
+          return { ...l, family, bold, italic, fontLabel, embedded: info?.embedded ?? false, embeddedFontId };
         });
         if (!cancelled) setRuns(enriched);
       } catch {
@@ -437,6 +454,21 @@ export function PageCanvas() {
     [page, scanBaselines],
   );
 
+  // Left edges a selected text box can snap to (vertical alignment): scanned lines +
+  // other text boxes, so the starts of lists/paragraphs line up to the same column.
+  const getAlignTargetsX = useCallback(
+    (excludeId: string | null): number[] => {
+      const xs = [...scanLeftEdges];
+      if (page) {
+        for (const el of page.elements) {
+          if (el.type === 'text' && el.id !== excludeId) xs.push(el.x);
+        }
+      }
+      return xs;
+    },
+    [page, scanLeftEdges],
+  );
+
   // Arrow keys nudge the selected element pixel-for-pixel for precise placement:
   // each press moves exactly one screen pixel (Shift = 10), independent of the zoom,
   // so a deeply zoomed-in field can be inched into place. A neighbour-baseline guide
@@ -462,12 +494,15 @@ export function PageCanvas() {
       else if (e.key === 'ArrowUp') ny -= step;
       else ny += step;
 
-      // Visual-only alignment hint: show the guide when the (unrotated) text baseline
-      // coincides with a neighbour's, then it vanishes again as you move on.
-      let guide: number | null = null;
+      // Visual-only alignment hints: show a guide when the (unrotated) text baseline or
+      // left edge coincides with a neighbour's, then it vanishes again as you move on.
+      let guideY: number | null = null;
+      let guideX: number | null = null;
       if (target.type === 'text' && !target.rotation) {
-        const near = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
-        if (near != null) guide = near;
+        const nearY = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
+        if (nearY != null) guideY = nearY;
+        const nearX = nearestBaseline(nx, getAlignTargetsX(selId), ALIGN_TOL / scale);
+        if (nearX != null) guideX = nearX;
       }
       // Snapshot once at the start of a burst (or when the target changes) so a
       // single undo reverts the whole run of nudges — matching addElement's model.
@@ -482,17 +517,19 @@ export function PageCanvas() {
         patch.points = target.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
       }
       updateElement(page.id, selId, patch);
-      setAlignGuideY(guide);
-      // End the burst (and clear the guide) after a short pause.
+      setAlignGuideY(guideY);
+      setAlignGuideX(guideX);
+      // End the burst (and clear the guides) after a short pause.
       if (nudgeTimer.current) window.clearTimeout(nudgeTimer.current);
       nudgeTimer.current = window.setTimeout(() => {
         nudgeActiveId.current = null;
         setAlignGuideY(null);
+        setAlignGuideX(null);
       }, 500);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [page, editingId, updateElement, commit, getAlignTargets, scale]);
+  }, [page, editingId, updateElement, commit, getAlignTargets, getAlignTargetsX, scale]);
 
   const evToView = (e: { clientX: number; clientY: number }) => {
     const rect = overlayRef.current!.getBoundingClientRect();
@@ -541,18 +578,22 @@ export function PageCanvas() {
       // the tool defaults, so the field lands here in exactly that font/size/style/colour.
       const ps = pendingTextStyle;
       const size = ps?.size ?? tool.textSize;
+      const lineHeight = ps?.lineHeight ?? 1.3;
+      // Box height = exactly one line, so the rendered glyphs sit centred in it and
+      // the click point can map to the line's true vertical middle.
+      const lineH = size * lineHeight;
       const el: TextElement = {
         id: uid('el'),
         type: 'text',
         // Insert the line exactly where the I-beam sits: the click point becomes the
-        // vertical middle of the first line (not the box top), so text lands on the
-        // line you pointed at instead of dropping below it.
+        // vertical middle of the first line (not the box top), so the typed text
+        // lands precisely where you clicked instead of dropping below it.
         x: start.x,
-        y: start.y - size * 0.5,
+        y: start.y - lineH / 2,
         // Start compact — the field hugs its content and grows as you type (see the
         // editor's auto-fit), instead of the old over-wide, over-long box.
         width: Math.max(size * 3.6, 40),
-        height: Math.max(size * 1.25, 16),
+        height: lineH,
         opacity: 1,
         z: nextZ(page),
         text: '',
@@ -562,7 +603,7 @@ export function PageCanvas() {
         italic: ps?.italic ?? false,
         color: ps?.color ?? tool.textColor,
         align: 'left',
-        lineHeight: ps?.lineHeight ?? 1.3,
+        lineHeight,
         embeddedFontId: ps?.embeddedFontId,
       };
       addElement(page.id, el);
@@ -1112,7 +1153,9 @@ export function PageCanvas() {
               interactive={activeTool === 'select' || editingId === el.id || (activeTool === 'edit-text' && el.type === 'text')}
               editTextMode={activeTool === 'edit-text'}
               alignBaselines={getAlignTargets(el.id)}
+              alignXs={getAlignTargetsX(el.id)}
               onAlignGuide={setAlignGuideY}
+              onAlignGuideX={setAlignGuideX}
               onStartEdit={() => startEditElement(el.id)}
               onEndEdit={endTextEdit}
               updateElement={updateElement}
@@ -1122,8 +1165,10 @@ export function PageCanvas() {
 
           {draft && <DraftView el={draft} scale={scale} />}
 
-          {/* Alignment guide: appears only while a text baseline sits exactly on a neighbour's. */}
+          {/* Alignment guides: horizontal lights up on a shared baseline, vertical on a
+              shared left edge — pure confirmation of the snap that just engaged. */}
           {alignGuideY != null && <div className="align-guide" style={{ top: alignGuideY * scale }} />}
+          {alignGuideX != null && <div className="align-guide-v" style={{ left: alignGuideX * scale }} />}
 
           {activeTool === 'edit-text' && (
             <>

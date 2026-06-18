@@ -5,9 +5,9 @@ import { nearestBaseline } from '../lib/utils/align';
 import { inkDashArray } from '../lib/utils/ink';
 import { Lock, Unlock } from 'lucide-react';
 
-// Screen-pixel tolerance for the visual baseline guide while dragging text — tight,
-// because the line is a confirmation of exact alignment, never a magnet.
-const ALIGN_TOL = 1.5;
+// Screen-pixel catch radius for the alignment magnet while *dragging* text. Generous
+// enough that exact alignment is effortless, small enough never to fight a free move.
+const SNAP_TOL = 6;
 
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const;
 type Handle = (typeof HANDLES)[number];
@@ -23,15 +23,19 @@ interface Props {
   editTextMode?: boolean;
   /** baselines (view-points) a dragged text box may snap to for alignment */
   alignBaselines?: number[];
-  /** report the active alignment guide while dragging (null clears it) */
+  /** left edges (view-points) a dragged text box may snap to (list/paragraph starts) */
+  alignXs?: number[];
+  /** report the active horizontal (baseline) guide while dragging (null clears it) */
   onAlignGuide?: (y: number | null) => void;
+  /** report the active vertical (left-edge) guide while dragging (null clears it) */
+  onAlignGuideX?: (x: number | null) => void;
   onStartEdit: () => void;
   onEndEdit: () => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   commit: () => void;
 }
 
-export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, alignBaselines, onAlignGuide, onStartEdit, onEndEdit, updateElement, commit }: Props) {
+export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, alignBaselines, alignXs, onAlignGuide, onAlignGuideX, onStartEdit, onEndEdit, updateElement, commit }: Props) {
   const selectedId = useStore((s) => s.selectedElementId);
   const selectElement = useStore((s) => s.selectElement);
   const selected = selectedId === el.id && interactive;
@@ -84,23 +88,44 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       const dx = (ev.clientX - startX) / scale;
       const dy = (ev.clientY - startY) / scale;
       if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
-      const y = origin.y + dy; // free movement, no magnet
-      // Visual-only guide: light up the shared line when this text's baseline lands
-      // exactly on a neighbour's, then let it vanish as soon as you move on.
-      let guide: number | null = null;
-      if (el.type === 'text' && !el.rotation && alignBaselines && alignBaselines.length) {
+      let nx = origin.x + dx;
+      let ny = origin.y + dy;
+      // Snap a moving TEXT box onto a neighbour's baseline (horizontal) or onto a
+      // neighbour's left edge (vertical) — both measured on the letters, not the box —
+      // so the starts of lists/paragraphs and shared baselines line up precisely. A
+      // gentle magnet (SNAP_TOL) makes exact alignment effortless without trapping a
+      // free move; the matching guide lights up while it's engaged.
+      let guideY: number | null = null;
+      let guideX: number | null = null;
+      if (el.type === 'text' && !el.rotation) {
         const size = (el as TextElement).size;
-        guide = nearestBaseline(y + size * BASELINE_RATIO, alignBaselines, ALIGN_TOL / scale);
+        const tol = SNAP_TOL / scale;
+        if (alignBaselines && alignBaselines.length) {
+          const snapY = nearestBaseline(ny + size * BASELINE_RATIO, alignBaselines, tol);
+          if (snapY != null) {
+            ny = snapY - size * BASELINE_RATIO;
+            guideY = snapY;
+          }
+        }
+        if (alignXs && alignXs.length) {
+          const snapX = nearestBaseline(nx, alignXs, tol);
+          if (snapX != null) {
+            nx = snapX;
+            guideX = snapX;
+          }
+        }
       }
-      onAlignGuide?.(guide);
-      const patch: ElementPatch = { x: origin.x + dx, y };
-      if (inkPoints) patch.points = inkPoints.map((p) => ({ x: p.x + dx, y: p.y + (y - origin.y) }));
+      onAlignGuide?.(guideY);
+      onAlignGuideX?.(guideX);
+      const patch: ElementPatch = { x: nx, y: ny };
+      if (inkPoints) patch.points = inkPoints.map((p) => ({ x: p.x + (nx - origin.x), y: p.y + (ny - origin.y) }));
       updateElement(pageId, el.id, patch);
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       onAlignGuide?.(null);
+      onAlignGuideX?.(null);
       if (moved) commit();
     };
     window.addEventListener('pointermove', move);

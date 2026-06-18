@@ -1543,14 +1543,25 @@ svg.draft {
   box-shadow: inset 0 0 0 1.5px var(--accent), 0 2px 12px var(--accent-tint);
 }
 
-/* Horizontal guide that appears only while a text baseline sits exactly on a
-   neighbour's — a pure visual confirmation of alignment (it never snaps the box). */
+/* Alignment guides shown while a text box is being moved: the horizontal one lights
+   up on a shared baseline, the vertical one on a shared left edge (list/paragraph
+   starts). They confirm the gentle snap that engages on the letters themselves. */
 .align-guide {
   position: absolute;
   left: 0;
   right: 0;
   height: 0;
   border-top: 1px solid var(--accent);
+  box-shadow: 0 0 5px 0.5px var(--accent);
+  pointer-events: none;
+  z-index: 6;
+}
+.align-guide-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid var(--accent);
   box-shadow: 0 0 5px 0.5px var(--accent);
   pointer-events: none;
   z-index: 6;

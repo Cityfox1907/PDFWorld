@@ -72,10 +72,7 @@ die bestehenden Seiten eingezeichnet.
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
 - **Bilder** platzieren und **bearbeiten** – **zuschneiden** (Ränder per Griffe
-  anpassen), mit einem **Rand** versehen (Dicke · Stil · Farbe) und den **Hintergrund
-  entfernen**: ein automatischer Magic-Wand löst einfarbige/ähnliche Hintergründe von
-  den Rändern her (mit Toleranz-Regler), feine **Behalten/Entfernen-Pinsel** bessern
-  von Hand nach – verlustfrei in voller Bildauflösung angewandt
+  anpassen) und mit einem **Rand** versehen (Dicke · Stil · Farbe)
 - **Markieren** – als **Rechteck** über eine Textzeile oder als **Textmarker-Stift**
   mit ovaler Spitze frei über den Text gezeichnet (echter Multiply-Blend, damit der
   Text darunter lesbar bleibt)

@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useStore } from '../state/store';
 import { useUI } from '../state/ui';
 import { viewportBridge } from '../state/viewport';
-import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2, Moon, Sun } from 'lucide-react';
+import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2, Moon, Sun, History } from 'lucide-react';
 
 export function TopBar() {
   const fileName = useStore((s) => s.fileName);
@@ -16,6 +16,14 @@ export function TopBar() {
   const exporting = useStore((s) => s.exporting);
   const mergeFile = useStore((s) => s.mergeFile);
   const reset = useStore((s) => s.reset);
+  const currentPageId = useStore((s) => s.currentPageId);
+  const resetPage = useStore((s) => s.resetPage);
+  // Enabled only when the current page actually carries edits (added elements or a
+  // user rotation) — so resetting an untouched page is a no-op the button reflects.
+  const canResetPage = useStore((s) => {
+    const p = s.pages.find((pg) => pg.id === s.currentPageId);
+    return !!p && (p.elements.length > 0 || p.addedRotation !== 0);
+  });
   const theme = useUI((s) => s.theme);
   const toggleTheme = useUI((s) => s.toggleTheme);
   const mergeRef = useRef<HTMLInputElement>(null);
@@ -70,6 +78,14 @@ export function TopBar() {
           title={theme === 'dark' ? 'Helles Design' : 'Dunkles Design'}
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
+          className="btn ghost"
+          onClick={() => currentPageId && resetPage(currentPageId)}
+          disabled={!canResetPage}
+          title="Diese Seite auf das Original zurücksetzen (rückgängig machbar)"
+        >
+          <History size={16} /> Seite zurücksetzen
         </button>
         <button className="btn ghost" onClick={() => mergeRef.current?.click()} title="Weiteres PDF anfügen">
           <FilePlus2 size={16} /> PDF anfügen

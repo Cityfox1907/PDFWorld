@@ -286,41 +286,74 @@ function ElementBody({
         // behind it so the original glyphs are hidden live in the editor too.
         background: t.coverColor ?? undefined,
       };
+      // List markers hang in the margin to the LEFT of the box (so the box width — and
+      // the left-edge alignment guide — stays on the text itself, matching the export).
+      const listOn = t.list && t.list !== 'none';
+      const markerCol = listOn ? (
+        <div
+          className="list-markers"
+          style={{
+            position: 'absolute',
+            right: '100%',
+            top: 0,
+            marginRight: t.size * 0.35 * scale,
+            fontFamily: textStyle.fontFamily,
+            fontSize: t.size * scale,
+            fontWeight: textStyle.fontWeight,
+            fontStyle: textStyle.fontStyle,
+            lineHeight: t.lineHeight,
+            color: t.color,
+            textAlign: 'right',
+            whiteSpace: 'pre',
+            pointerEvents: 'none',
+          }}
+        >
+          {(t.text.length ? t.text.split('\n') : ['']).map((_, i) => (
+            <div key={i}>{t.list === 'bullet' ? '•' : `${i + 1}.`}</div>
+          ))}
+        </div>
+      ) : null;
       if (editing) {
         return (
-          <textarea
-            ref={taRef}
-            className="text-edit"
-            style={textStyle}
-            // wrap=off so the textarea never soft-wraps: each line keeps its true width,
-            // which is what the auto-fit below measures (and what the export draws).
-            wrap="off"
-            defaultValue={t.text}
-            onChange={(e) => {
-              const ta = e.currentTarget;
-              const width = Math.max(el.width, (ta.scrollWidth + 2) / scale);
-              const height = Math.max(el.height, ta.scrollHeight / scale);
-              updateElement(pageId, el.id, { text: ta.value, width, height });
-            }}
-            onBlur={onEndEdit}
-            onPointerDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              // Enter finishes the field (Shift+Enter adds a line); Escape also exits.
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                e.currentTarget.blur();
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-            }}
-          />
+          <>
+            {markerCol}
+            <textarea
+              ref={taRef}
+              className="text-edit"
+              style={textStyle}
+              // wrap=off so the textarea never soft-wraps: each line keeps its true width,
+              // which is what the auto-fit below measures (and what the export draws).
+              wrap="off"
+              defaultValue={t.text}
+              onChange={(e) => {
+                const ta = e.currentTarget;
+                const width = Math.max(el.width, (ta.scrollWidth + 2) / scale);
+                const height = Math.max(el.height, ta.scrollHeight / scale);
+                updateElement(pageId, el.id, { text: ta.value, width, height });
+              }}
+              onBlur={onEndEdit}
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                // Enter finishes the field (Shift+Enter adds a line); Escape also exits.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+              }}
+            />
+          </>
         );
       }
       return (
-        <div className="text-body" style={textStyle}>
-          {t.text || <span className="text-placeholder">Text…</span>}
-        </div>
+        <>
+          {markerCol}
+          <div className="text-body" style={textStyle}>
+            {t.text || <span className="text-placeholder">Text…</span>}
+          </div>
+        </>
       );
     }
     case 'rect': {

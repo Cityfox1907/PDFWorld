@@ -439,7 +439,7 @@ export class Baker {
     const color = rgbColor(o.color);
     const rawLines = o.text.length ? o.text.split('\n') : [''];
     const list = o.list && o.list !== 'none' ? o.list : null;
-    const indent = list ? o.size * 1.5 : 0;
+    const markerGap = o.size * 0.35;
 
     const rot = o.rotation ?? 0;
     const cx = o.pivotX ?? o.x + o.width / 2;
@@ -477,8 +477,19 @@ export class Baker {
       if (list) {
         num++;
         const marker = list === 'bullet' ? '•' : `${num}.`;
-        drawAt(o.x, baselineY, marker); // marker hangs at the left edge
-        if (raw) drawAt(o.x + indent, baselineY, raw);
+        // Right-align the marker just left of the text column (hanging in the margin),
+        // exactly like the on-screen marker column, so screen and export agree.
+        let mw = o.size * 0.5;
+        try {
+          mw = stdFont.widthOfTextAtSize(marker, o.size);
+        } catch {
+          /* keep the estimate */
+        }
+        drawAt(o.x - markerGap - mw, baselineY, marker);
+        if (raw) {
+          const x0 = lineX(o.x, o.width, raw, o.align, unicodeFont ?? stdFont, o.size);
+          drawAt(x0, baselineY, raw);
+        }
       } else if (raw) {
         const x0 = lineX(o.x, o.width, raw, o.align, unicodeFont ?? stdFont, o.size);
         drawAt(x0, baselineY, raw);

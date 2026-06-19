@@ -14,6 +14,7 @@ import { classifyFont, prettyFontName, firstBaselineOffset } from '../src/lib/pd
 import { shapeOutline, isStrokeOnlyShape } from '../src/lib/pdf/shapes.ts';
 import { registerEmbeddedFont, getEmbeddedFont, embeddedFontFamily } from '../src/lib/pdf/embeddedFonts.ts';
 import type { AnyElement, ShapeKind } from '../src/lib/pdf/types.ts';
+import fs from 'node:fs';
 
 let passed = 0;
 let failed = 0;
@@ -345,6 +346,65 @@ async function run(): Promise<void> {
     ok('missing embedded font falls back to standard', text[0].includes('ORIGINAL'));
     ok('bullet-list text baked', text[0].includes('ITEMA') && text[0].includes('ITEMB'));
     ok('callout bubble text baked', text[0].includes('NOTED'));
+  }
+
+  // ── EMBEDDED ORIGINAL FONT round-trips through EXPORT (editor 1:1 == saved PDF) ──
+  // The core promise of the scan editor: a line adopted with its embedded original is
+  // reproduced in the SAVED pdf with that very font program — never silently downgraded
+  // to Helvetica. We capture a real DejaVu face exactly as the app does (pdf.js, keeping
+  // the font program), register it, bake an overlay onto a Helvetica host page, then
+  // re-read the EXPORT and prove the page now carries the DejaVu original with its glyphs
+  // — i.e. what the editor shows is what the saved file contains.
+  console.log('\nembedded original font survives export (WYSIWYG)');
+  {
+    const fontPath = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
+    if (!fs.existsSync(fontPath)) {
+      ok('DejaVu test font present (test skipped where unavailable)', true);
+    } else {
+      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      const { default: fontkit } = await import('@pdf-lib/fontkit');
+
+      // Build a one-line PDF embedding DejaVu, then read its program back via pdf.js with
+      // fontExtraProperties — precisely what inspectFonts() captures in the app.
+      const ttf = new Uint8Array(fs.readFileSync(fontPath));
+      const srcDoc = await PDFDocument.create();
+      srcDoc.registerFontkit(fontkit);
+      const srcFont = await srcDoc.embedFont(ttf, { subset: true });
+      const sp = srcDoc.addPage([300, 120]);
+      sp.drawText('Dostojewski', { x: 20, y: 60, size: 22, font: srcFont });
+      const srcBytes = await srcDoc.save();
+
+      const jsDoc = await pdfjs.getDocument({ data: srcBytes.slice(), fontExtraProperties: true, isEvalSupported: false, useSystemFonts: false }).promise;
+      const jsPage = await jsDoc.getPage(1);
+      const tc = await jsPage.getTextContent();
+      const fontName = (tc.items.find((i) => 'fontName' in i) as { fontName?: string } | undefined)?.fontName ?? '';
+      await jsPage.getOperatorList();
+      const fObj = jsPage.commonObjs.get(fontName) as { name?: string; data?: Uint8Array; mimetype?: string } | null;
+      const captured = fObj?.data;
+      ok('captured original program from pdf.js (has bytes)', !!captured && captured.length > 0);
+      ok('captured font is the real DejaVu face', /dejavu/i.test(fObj?.name ?? ''));
+
+      // Register like the scan tool, then bake an overlay onto a *Helvetica* host page.
+      const embId = `test#0#${fontName}`;
+      registerEmbeddedFont({ id: embId, data: captured!, mimetype: fObj?.mimetype || 'font/opentype' });
+      const host = await PDFDocument.load(await makeSamplePdf(['HOSTPAGE']));
+      const overlay = { ...textEl({ id: 'adopt', text: 'Dostojewski', x: 40, y: 80, family: 'serif', bold: true }), embeddedFontId: embId } as AnyElement;
+      const out = await exportInPlace(host, [{ sourceKey: 'main', sourceIndex: 0, addedRotation: 0, elements: [overlay] }], {});
+
+      // Re-read the EXPORTED pdf: the page must now carry an embedded DejaVu font (the
+      // overlay's original), proving the adopted face — not a Helvetica fallback — landed
+      // in the saved file.
+      const outDoc = await pdfjs.getDocument({ data: out.slice(), fontExtraProperties: true, isEvalSupported: false, useSystemFonts: false }).promise;
+      const outPage = await outDoc.getPage(1);
+      const otc = await outPage.getTextContent();
+      const outNames = [...new Set(otc.items.filter((i) => 'fontName' in i).map((i) => (i as { fontName: string }).fontName))];
+      await outPage.getOperatorList();
+      const outFonts = outNames.map((n) => outPage.commonObjs.get(n) as { name?: string; data?: Uint8Array; missingFile?: boolean } | null);
+      const hasDejaVu = outFonts.some((f) => !!f && /dejavu/i.test(f.name ?? '') && !f.missingFile && (f.data?.length ?? 0) > 0);
+      const hasText = otc.items.map((i) => ('str' in i ? i.str : '')).join('').includes('Dostojewski');
+      ok('exported page embeds the adopted DejaVu original (not a Helvetica fallback)', hasDejaVu);
+      ok('adopted text is present in the exported pdf', hasText);
+    }
   }
 
   // ── hidden elements are skipped; dashed/dotted ink bakes cleanly ──

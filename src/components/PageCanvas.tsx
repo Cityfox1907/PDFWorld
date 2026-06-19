@@ -369,8 +369,10 @@ export function PageCanvas() {
           const realStyle = info ? classifyFont(info.rawName) : null;
           const hasRealName = !!info && !isInternalFontName(rawForName);
           const family = hasRealName ? resolveFamilyKey(rawForName) : l.family;
-          const bold = realStyle ? l.bold || realStyle.bold : l.bold;
-          const italic = realStyle ? l.italic || realStyle.italic : l.italic;
+          // Combine every weight/slant signal: the run, the real name's tokens AND pdf.js's
+          // descriptor flags — so a Bold/Italic face is caught even when its name is silent.
+          const bold = l.bold || !!realStyle?.bold || !!info?.bold;
+          const italic = l.italic || !!realStyle?.italic || !!info?.italic;
           return { ...l, family, bold, italic, fontLabel, embedded, embeddedFontId };
         });
         if (!cancelled) setRuns(enriched);

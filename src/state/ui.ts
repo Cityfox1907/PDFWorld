@@ -2,13 +2,30 @@ import { create } from 'zustand';
 
 export type Theme = 'light' | 'dark';
 
+/**
+ * How scrolling moves between pages in the editor:
+ *  - 'paged'      jump one whole page at a time (default) — reaching a page edge and
+ *                 scrolling on snaps to the next/previous page.
+ *  - 'continuous' flowing scroll — the leftover scroll carries straight into the next
+ *                 page so neighbouring pages blend seamlessly.
+ */
+export type ScrollMode = 'paged' | 'continuous';
+
 const THEME_KEY = 'pdfworld:theme';
+const SCROLL_KEY = 'pdfworld:scrollMode';
 
 function readTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
   const saved = window.localStorage.getItem(THEME_KEY);
   if (saved === 'light' || saved === 'dark') return saved;
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function readScrollMode(): ScrollMode {
+  if (typeof window === 'undefined') return 'paged';
+  const saved = window.localStorage.getItem(SCROLL_KEY);
+  // The default is deliberately page-by-page, never the continuous flow.
+  return saved === 'continuous' ? 'continuous' : 'paged';
 }
 
 /** Reflect the active theme onto <html> so the CSS variable set switches. */
@@ -30,6 +47,8 @@ interface UIState {
   /** thumbnail magnification in the page overview (kept at 1; the slider was removed) */
   thumbZoom: number;
   theme: Theme;
+  /** whether scrolling jumps page-by-page (default) or flows continuously */
+  scrollMode: ScrollMode;
   openSignature: () => void;
   closeSignature: () => void;
   toggleSidebar: () => void;
@@ -40,6 +59,7 @@ interface UIState {
   openSaveDialog: () => void;
   closeSaveDialog: () => void;
   toggleTheme: () => void;
+  toggleScrollMode: () => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -50,6 +70,7 @@ export const useUI = create<UIState>((set) => ({
   saveDialogOpen: false,
   thumbZoom: 1,
   theme: readTheme(),
+  scrollMode: readScrollMode(),
   openSignature: () => set({ signatureOpen: true }),
   closeSignature: () => set({ signatureOpen: false }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -65,5 +86,11 @@ export const useUI = create<UIState>((set) => ({
       applyTheme(theme);
       if (typeof window !== 'undefined') window.localStorage.setItem(THEME_KEY, theme);
       return { theme };
+    }),
+  toggleScrollMode: () =>
+    set((s) => {
+      const scrollMode: ScrollMode = s.scrollMode === 'paged' ? 'continuous' : 'paged';
+      if (typeof window !== 'undefined') window.localStorage.setItem(SCROLL_KEY, scrollMode);
+      return { scrollMode };
     }),
 }));

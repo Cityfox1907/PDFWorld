@@ -18,7 +18,12 @@ die bestehenden Seiten eingezeichnet.
   **löschen**, **drehen**
 - **Seiten anordnen (Vollbild)** – ein Umschalter öffnet alle Seiten in einem
   grossen Raster; oben rechts lassen sich eine **leere Seite** oder ein **weiteres
-  PDF** anfügen, ideal um auch 30–40 Seiten bequem zu sortieren
+  PDF** anfügen, ideal um auch 30–40 Seiten bequem zu sortieren. Seiten aus
+  **demselben Quell-PDF** tragen eine **dezente gemeinsame Farbe**, damit
+  zusammengeführte Dokumente auf einen Blick auseinanderzuhalten sind. **Mehrere
+  Seiten gleichzeitig** lassen sich auswählen – einen **Rahmen aufziehen** oder mit
+  **⌘/Strg-Klick** bzw. **Shift-Klick** – und dann gemeinsam **drehen,
+  duplizieren, löschen** oder per Drag & Drop **verschieben**
 
 ### 2. Bearbeitung
 - **Text scannen & bearbeiten** – ein Scan erkennt jede Textzeile und bündelt sie
@@ -46,7 +51,9 @@ die bestehenden Seiten eingezeichnet.
   die **Grundlinie der Buchstaben** einer Nachbarzeile (waagrecht) und auf deren
   **linken Anfang** (senkrecht) ein – gemessen am Text selbst, nicht am Kasten. So
   bringst du Listen- und Absatz-Anfänge präzise auf eine Linie; eine dezente
-  **Hilfslinie** bestätigt die Ausrichtung
+  **Hilfslinie** bestätigt die Ausrichtung. Die waagrechte Linie ist **exakt auf die
+  Schrift-Grundlinie kalibriert** (inkl. Zeilenhöhe), sodass Bildschirm, Hilfslinie
+  und Export deckungsgleich sind
 - **Drehen** – jedes Element (Textfeld, Form, Bild …) lässt sich per Regler frei
   drehen; die Drehung wird verlustfrei exakt so in die Seite gezeichnet
 - **Bereich ausschneiden / duplizieren** – einen Bereich als **Rechteck** aufziehen
@@ -77,16 +84,21 @@ die bestehenden Seiten eingezeichnet.
 - **Sprechblasen / Kommentare** – eine **Sprechblase** mit Zeiger als Notiz auf der
   Seite platzieren (Umschalter im Text-Werkzeug), mit eigener Schrift- und Blasenfarbe
 - **Elemente (Formen)** – ein **Formen-Menü** in der Werkzeugleiste mit Rechteck,
-  Ellipse, Dreieck, Raute, Stern, Pfeil und Linie; ein **einzelner Klick** setzt die
-  Form in Standardgrösse (Aufziehen für eine eigene Grösse bleibt möglich); Füllung,
-  Rand, Randstil und Drehung frei einstellbar
+  Ellipse, Dreieck, rechtwinkligem Dreieck, Raute, Fünf-/Sechs-/Achteck,
+  Parallelogramm, Trapez, Stern, Herz, Wolke, Kreuz, Chevron, Pfeil, Doppelpfeil
+  und Linie; ein **einzelner Klick** setzt die Form in Standardgrösse (Aufziehen für
+  eine eigene Grösse bleibt möglich); Füllung, Rand, Randstil und Drehung frei
+  einstellbar
 - **Farbauswahl** – ein aufgeräumter Farbwähler mit kuratierter Palette, zuletzt
   verwendeten Tönen und – wo der Browser es unterstützt – einer **Pipette**, die eine
   Farbe direkt aus dem Dokument aufnimmt
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
-- **Bilder** platzieren und **bearbeiten** – **zuschneiden** (Ränder per Griffe
-  anpassen) und mit einem **Rand** versehen (Dicke · Stil · Farbe)
+- **Bilder** platzieren und **bearbeiten** – **verlustfrei** eingefügt: PNG und
+  JPEG werden **Byte für Byte im Original** eingebettet, jedes andere Format (WebP,
+  GIF, BMP …) wird **pixelgenau verlustfrei zu PNG** umgewandelt, damit die Qualität
+  immer dem Original entspricht. **Zuschneiden** (Ränder per Griffe anpassen) und mit
+  einem **Rand** versehen (Dicke · Stil · Farbe)
 - **Markieren** – als **Textmarker-Stift** mit ovaler Spitze frei über den Text
   gezeichnet (Standard) oder als **Rechteck** über eine ganze Textzeile (echter
   Multiply-Blend, damit der Text darunter lesbar bleibt) – jederzeit umschaltbar
@@ -103,6 +115,12 @@ die bestehenden Seiten eingezeichnet.
   Elemente zusätzlich dezent auf der Seite umrandet
 
 ### 3. Oberfläche
+- **Logo = Home** – ein Klick auf das **PDFWorld**-Logo oben links führt zurück
+  zur Startseite
+- **Scrollen wechselt die Seite** – am Seitenrand weiter zu scrollen springt zur
+  nächsten/vorherigen Seite. Ein **Umschalter neben dem Design-Schalter** wählt
+  zwischen **Seite für Seite** (Standard, ein klarer Sprung pro Geste) und
+  **fliessend** (der Wechsel läuft direkt weiter)
 - **Helles & dunkles Design** (umschaltbar, merkt sich die Wahl)
 - **Zoom bis 2000 %** – per Lupen-Buttons (zoomt auf die **Mitte des sichtbaren
   Fensters**) oder ⌘/Strg + Mausrad bzw. Trackpad-Pinch (zoomt **genau dort, wo der

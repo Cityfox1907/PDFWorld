@@ -249,6 +249,18 @@
   font-weight: 700;
   font-size: 16px;
   letter-spacing: -0.4px;
+  color: var(--text);
+  padding: 5px 9px;
+  margin-left: -3px;
+  border-radius: var(--r-sm);
+  line-height: 1;
+  transition: background 0.15s var(--ease);
+}
+.brand:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+:root[data-theme='dark'] .brand:hover {
+  background: rgba(255, 255, 255, 0.07);
 }
 .brand em {
   font-style: normal;
@@ -391,7 +403,9 @@
   left: 52px;
   top: 0;
   z-index: 50;
-  width: 168px;
+  width: 268px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -407,21 +421,31 @@
   color: var(--text-3);
   padding: 4px 6px 8px;
 }
+/* Two compact columns so the growing set of shapes stays a tidy, glanceable grid. */
 .rail-flyout-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 2px;
 }
 .rail-flyout-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 9px;
+  padding: 7px 9px;
   border-radius: var(--r-sm);
   color: var(--text);
-  font-size: 13px;
+  font-size: 12.5px;
   text-align: left;
+  min-width: 0;
   transition: background 0.12s, color 0.12s;
+}
+.rail-flyout-item svg {
+  flex-shrink: 0;
+}
+.rail-flyout-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rail-flyout-item:hover {
   background: var(--bg-elevated);
@@ -431,9 +455,10 @@
   color: var(--accent);
 }
 
-/* Shape-kind switcher inside the inspector (a compact row of icon buttons). */
+/* Shape-kind switcher inside the inspector (a compact, wrapping icon grid). */
 .shape-kind-grid {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
   gap: 4px;
   flex: 1;
 }
@@ -1594,7 +1619,27 @@ svg.draft {
 }
 .organizer-head-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* Hairline separating the bulk-selection actions from the global ones. */
+.organizer-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--line);
+}
+/* Rubber-band rectangle for selecting several pages at once (rendered in client
+   coordinates, so position: fixed keeps it aligned while the grid scrolls). */
+.org-marquee {
+  position: fixed;
+  z-index: 200;
+  border: 1px solid var(--accent);
+  background: var(--accent-tint);
+  border-radius: 2px;
+  pointer-events: none;
 }
 .organizer-grid-wrap {
   flex: 1;
@@ -1629,9 +1674,30 @@ svg.draft {
 .org-frame:active {
   cursor: grabbing;
 }
+/* Pages from the same source PDF share a subtle tint: a thin top bar + a faint frame
+   wash, so multi-PDF documents stay easy to tell apart at a glance. */
+.org-card.tinted .org-frame {
+  border-color: var(--src-line);
+  background: var(--src-soft);
+}
+.org-srcbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--src-tint);
+  z-index: 2;
+  pointer-events: none;
+}
 .org-card.active .org-frame {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-ring);
+}
+/* A multi-selected page: a clear accent ring (wins over tint + active). */
+.org-card.selected .org-frame {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 .org-canvas {
   max-width: 100%;
@@ -1696,6 +1762,8 @@ svg.draft {
   box-shadow: 0 0 5px 0.5px var(--accent);
   pointer-events: none;
   z-index: 6;
+  /* The 1px stroke renders below `top`; nudge up so it straddles the exact baseline. */
+  transform: translateY(-0.5px);
 }
 .align-guide-v {
   position: absolute;
@@ -1706,6 +1774,8 @@ svg.draft {
   box-shadow: 0 0 5px 0.5px var(--accent);
   pointer-events: none;
   z-index: 6;
+  /* Likewise centre the 1px stroke on the exact left-edge coordinate. */
+  transform: translateX(-0.5px);
 }
 
 /* Rubber-band marquee drawn with the select tool to pick several elements at once. */

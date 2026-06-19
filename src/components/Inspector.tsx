@@ -6,6 +6,7 @@ import { uid } from '../lib/utils/id';
 import { inkDashArray } from '../lib/utils/ink';
 import { FontPicker } from './FontPicker';
 import { ColorPicker } from './ColorPicker';
+import { ParallelogramIcon, TrapezoidIcon } from './shapeIcons';
 import {
   Bold,
   Italic,
@@ -30,9 +31,18 @@ import {
   Square,
   Circle,
   Triangle,
+  TriangleRight,
   Diamond,
+  Pentagon,
+  Hexagon,
+  Octagon,
   Star,
+  Heart,
+  Cloud,
+  Plus,
+  ChevronRight,
   ArrowRight,
+  ArrowLeftRight,
   Minus,
   Shapes,
   MessageSquare,
@@ -136,9 +146,20 @@ const ELEMENT_META: Record<AnyElement['type'], { icon: LucideIcon; title: string
 /** Per-shape icon + label so the inspector title/kind switcher reads clearly. */
 const SHAPE_META: Record<ShapeKind, { icon: LucideIcon; label: string }> = {
   triangle: { icon: Triangle, label: 'Dreieck' },
+  'right-triangle': { icon: TriangleRight, label: 'Rechtw. Dreieck' },
   diamond: { icon: Diamond, label: 'Raute' },
+  pentagon: { icon: Pentagon, label: 'Fünfeck' },
+  hexagon: { icon: Hexagon, label: 'Sechseck' },
+  octagon: { icon: Octagon, label: 'Achteck' },
+  parallelogram: { icon: ParallelogramIcon, label: 'Parallelogramm' },
+  trapezoid: { icon: TrapezoidIcon, label: 'Trapez' },
   star: { icon: Star, label: 'Stern' },
+  heart: { icon: Heart, label: 'Herz' },
+  cloud: { icon: Cloud, label: 'Wolke' },
+  cross: { icon: Plus, label: 'Kreuz' },
+  chevron: { icon: ChevronRight, label: 'Chevron' },
   arrow: { icon: ArrowRight, label: 'Pfeil' },
+  'double-arrow': { icon: ArrowLeftRight, label: 'Doppelpfeil' },
   line: { icon: Minus, label: 'Linie' },
 };
 

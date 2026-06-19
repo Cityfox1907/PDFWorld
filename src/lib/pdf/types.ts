@@ -37,7 +37,23 @@ export type ElementType =
  * dedicated rectangle and ellipse element types. Each is drawn from a single
  * geometry helper (see shapes.ts) so screen and export match exactly.
  */
-export type ShapeKind = 'triangle' | 'diamond' | 'star' | 'arrow' | 'line';
+export type ShapeKind =
+  | 'triangle'
+  | 'right-triangle'
+  | 'diamond'
+  | 'pentagon'
+  | 'hexagon'
+  | 'octagon'
+  | 'parallelogram'
+  | 'trapezoid'
+  | 'star'
+  | 'heart'
+  | 'cloud'
+  | 'cross'
+  | 'chevron'
+  | 'arrow'
+  | 'double-arrow'
+  | 'line';
 
 export interface BaseElement {
   id: string;

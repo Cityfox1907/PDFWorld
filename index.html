@@ -9,6 +9,14 @@
       name="description"
       content="PDFWorld — PDFs verlustfrei bearbeiten, Seiten verwalten und Formulare ausfüllen. Alles lokal in deinem Browser, nichts wird hochgeladen."
     />
+    <!-- PWA: lets phones install PDFWorld to the home screen and launch it full-screen
+         like an app. Inert on desktop browsers. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="PDFWorld" />
     <title>PDFWorld — PDF Editor</title>
   </head>
   <body>

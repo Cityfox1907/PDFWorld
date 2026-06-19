@@ -12,8 +12,7 @@ import {
   cssStackFor,
   classifyFont,
   matchCatalogFontKey,
-  isGenericFontLabel,
-  isInternalFontName,
+  fontDisplayName,
   BASELINE_RATIO,
   shapeOutline,
   pointsToSvgPath,
@@ -71,6 +70,7 @@ export function PageCanvas() {
   const deleteElement = useStore((s) => s.deleteElement);
   const commit = useStore((s) => s.commit);
   const selectElement = useStore((s) => s.selectElement);
+  const selectElements = useStore((s) => s.selectElements);
   const setTool = useStore((s) => s.setTool);
   const setToolDefaults = useStore((s) => s.setToolDefaults);
   const addRecentColor = useStore((s) => s.addRecentColor);
@@ -93,6 +93,8 @@ export function PageCanvas() {
   const [fitScale, setFitScale] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AnyElement | null>(null);
+  // Rubber-band selection rectangle (view-points) drawn with the select tool.
+  const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [scanId, setScanId] = useState(0);
   // Scan tool: the line whose font panel is open, plus its sampled colours.
@@ -319,20 +321,20 @@ export function PageCanvas() {
         if (cancelled) return;
         const enriched = lines.map((l) => {
           const info = infos.get(l.fontName);
+          const embedded = info?.embedded ?? false;
           let embeddedFontId = l.embeddedFontId;
-          if (info?.embedded && info.data) {
+          if (embedded && info?.data) {
             const id = `${pageSourceKey}#${pageSourceIndex}#${l.fontName}`;
             registerEmbeddedFont({ id, data: info.data, mimetype: info.mimetype || 'font/opentype' });
             embeddedFontId = id;
           }
-          // The real font name from the PDF (info.displayName, taken from the font's
-          // own /BaseFont) is the most accurate. Prefer it whenever the run-level
-          // label is only a generic family ("Sans-Serif") so the panel never shows a
-          // placeholder when a true name is available — and refine the fallback family.
-          const realName = info?.displayName;
-          const useReal = !!realName && !isGenericFontLabel(realName) && !isInternalFontName(realName) && (!l.fontLabel || isGenericFontLabel(l.fontLabel));
-          const fontLabel = useReal ? realName : (l.fontLabel ?? realName);
-          const family = (useReal && matchCatalogFontKey(realName)) || l.family;
+          // The font's own /BaseFont name (info.rawName) is the most accurate identity;
+          // fall back to the run's pdf.js name. fontDisplayName turns it into the honest
+          // label the panel shows: a catalogue name we can reproduce, the embedded
+          // original's real name, a generic family, or "Unbekannt".
+          const rawForName = info?.rawName ?? l.fontName;
+          const fontLabel = fontDisplayName(rawForName, embedded);
+          const family = matchCatalogFontKey(rawForName) ?? l.family;
           // Re-derive weight/style from the font's REAL /BaseFont name, which is
           // authoritative. pdf.js often reports only a generic "sans-serif" style
           // for a non-embedded face — so a "Helvetica-Bold" line would lose its bold
@@ -341,7 +343,7 @@ export function PageCanvas() {
           const realStyle = info ? classifyFont(info.rawName) : null;
           const bold = realStyle ? l.bold || realStyle.bold : l.bold;
           const italic = realStyle ? l.italic || realStyle.italic : l.italic;
-          return { ...l, family, bold, italic, fontLabel, embedded: info?.embedded ?? false, embeddedFontId };
+          return { ...l, family, bold, italic, fontLabel, embedded, embeddedFontId };
         });
         if (!cancelled) setRuns(enriched);
       } catch {
@@ -486,26 +488,30 @@ export function PageCanvas() {
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
       const selId = useStore.getState().selectedElementId;
       if (!selId) return;
-      const target = page.elements.find((el) => el.id === selId);
-      if (!target || target.locked) return;
+      // Nudge every selected (unlocked) element by the same step so a multi-selection
+      // moves rigidly, just like dragging it.
+      const ids = useStore.getState().selectedElementIds;
+      const targets = page.elements.filter((el) => ids.includes(el.id) && !el.locked);
+      if (!targets.length) return;
       e.preventDefault();
       // One CSS pixel in view-points; coarse step with Shift.
       const step = (e.shiftKey ? 10 : 1) / scale;
-      let nx = target.x;
-      let ny = target.y;
-      if (e.key === 'ArrowLeft') nx -= step;
-      else if (e.key === 'ArrowRight') nx += step;
-      else if (e.key === 'ArrowUp') ny -= step;
-      else ny += step;
+      let dx = 0;
+      let dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step;
+      else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step;
+      else dy = step;
 
-      // Visual-only alignment hints: show a guide when the (unrotated) text baseline or
-      // left edge coincides with a neighbour's, then it vanishes again as you move on.
+      // Visual-only alignment hints (single text box only): show a guide when the
+      // (unrotated) baseline or left edge coincides with a neighbour's.
       let guideY: number | null = null;
       let guideX: number | null = null;
-      if (target.type === 'text' && !target.rotation) {
-        const nearY = nearestBaseline(ny + target.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
+      const primary = targets.length === 1 ? targets[0] : null;
+      if (primary && primary.type === 'text' && !primary.rotation) {
+        const nearY = nearestBaseline(primary.y + dy + primary.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
         if (nearY != null) guideY = nearY;
-        const nearX = nearestBaseline(nx, getAlignTargetsX(selId), ALIGN_TOL / scale);
+        const nearX = nearestBaseline(primary.x + dx, getAlignTargetsX(selId), ALIGN_TOL / scale);
         if (nearX != null) guideX = nearX;
       }
       // Snapshot once at the start of a burst (or when the target changes) so a
@@ -514,13 +520,13 @@ export function PageCanvas() {
         commit();
         nudgeActiveId.current = selId;
       }
-      const patch: ElementPatch = { x: nx, y: ny };
-      if (target.type === 'ink') {
-        const dx = nx - target.x;
-        const dy = ny - target.y;
-        patch.points = target.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+      for (const target of targets) {
+        const patch: ElementPatch = { x: target.x + dx, y: target.y + dy };
+        if (target.type === 'ink') {
+          patch.points = target.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+        }
+        updateElement(page.id, target.id, patch);
       }
-      updateElement(page.id, selId, patch);
       setAlignGuideY(guideY);
       setAlignGuideX(guideX);
       // End the burst (and clear the guides) after a short pause.
@@ -559,13 +565,15 @@ export function PageCanvas() {
     const start = evToView(e);
 
     if (activeTool === 'select') {
-      // Clicking empty space discards an abandoned, never-filled text box.
+      // Clicking empty space discards an abandoned, never-filled text box, then starts a
+      // rubber-band marquee: drag across the page to select every element it touches.
       const selId = useStore.getState().selectedElementId;
       if (selId) {
         const selEl = page.elements.find((el) => el.id === selId);
         if (isAbandonedText(selEl)) deleteElement(page.id, selId);
       }
-      selectElement(null);
+      if (!e.shiftKey) selectElement(null);
+      startMarquee(start, e);
       return;
     }
     if (activeTool === 'edit-text') {
@@ -609,6 +617,7 @@ export function PageCanvas() {
         align: 'left',
         lineHeight,
         embeddedFontId: ps?.embeddedFontId,
+        fontLabel: ps?.fontLabel,
       };
       addElement(page.id, el);
       if (ps) setPendingTextStyle(null); // the armed typeface is now consumed
@@ -672,6 +681,43 @@ export function PageCanvas() {
       return;
     }
     startShape(start, e);
+  };
+
+  // ── select tool: rubber-band marquee over empty page space ──
+  // Drag a rectangle to select every element it touches, so several can be moved (or
+  // deleted) together. Holding Shift adds the newly-touched elements to the selection.
+  const startMarquee = (start: { x: number; y: number }, e: React.PointerEvent) => {
+    if (!page) return;
+    const additive = e.shiftKey;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      const p = evToView(ev);
+      if (!moved && Math.abs(p.x - start.x) + Math.abs(p.y - start.y) <= 3 / scale) return;
+      moved = true;
+      setMarquee({
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        width: Math.abs(p.x - start.x),
+        height: Math.abs(p.y - start.y),
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setMarquee((m) => {
+        if (m && moved && (m.width > 3 / scale || m.height > 3 / scale)) {
+          const ids = page.elements.filter((el) => !el.hidden && rectsIntersect(m, el)).map((el) => el.id);
+          if (ids.length) {
+            const prev = additive ? useStore.getState().selectedElementIds : [];
+            selectElements([...prev, ...ids]);
+          }
+        }
+        return null;
+      });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
   // ── background cover brush: paints a stroke in the page's own background colour ──
@@ -857,7 +903,7 @@ export function PageCanvas() {
             strokeWidth: 0,
             radius: 0,
           });
-          setTool('select');
+          // Stay on the brush so several spots can be covered in a row.
         }
         return null;
       });
@@ -869,6 +915,12 @@ export function PageCanvas() {
 
   const startShape = (start: { x: number; y: number }, e: React.PointerEvent) => {
     if (!page) return;
+    // Vector shapes (Elemente menu) drop with a single CLICK at a comfortable default
+    // size — dragging is still honoured for a custom size, but no longer required.
+    const clickToPlace = activeTool === 'rect' || activeTool === 'ellipse' || activeTool === 'shape';
+    // The marking tool stays active after a stroke so you can keep highlighting and
+    // freely switch its mode (rectangle ↔ pen) without re-picking the tool.
+    const keepActive = activeTool === 'highlight';
     const base = { id: uid('el'), x: start.x, y: start.y, width: 0, height: 0, opacity: 1, z: nextZ(page) };
     const make = (w: number, h: number, x: number, y: number, flip: boolean): AnyElement => {
       if (activeTool === 'highlight')
@@ -884,8 +936,10 @@ export function PageCanvas() {
       }
       return { ...base, type: 'rect', x, y, width: w, height: h, fill: tool.shapeFill, stroke: tool.shapeStroke, strokeWidth: 1.5, radius: 0 };
     };
+    let moved = false;
     const move = (ev: PointerEvent) => {
       const p = evToView(ev);
+      if (Math.abs(p.x - start.x) + Math.abs(p.y - start.y) > 2 / scale) moved = true;
       const x = Math.min(start.x, p.x);
       const y = Math.min(start.y, p.y);
       const flip = (p.x - start.x) * (p.y - start.y) < 0; // dragged ↗ / ↙
@@ -895,6 +949,16 @@ export function PageCanvas() {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       setDraft((d) => {
+        // A click with no drag on a shape tool: place a default-sized shape centred on
+        // the click, ready to style and move — no aiming or aspect guesswork needed.
+        if (!moved && clickToPlace) {
+          const isLine = activeTool === 'shape' && tool.shapeKind === 'line';
+          const w = isLine ? 150 : 130;
+          const h = isLine ? 90 : 96;
+          addElement(page.id, make(w, h, start.x - w / 2, start.y - h / 2, false));
+          setTool('select');
+          return null;
+        }
         if (!d) return null;
         // A line only needs length in one axis; give it a selectable thickness.
         const isLine = d.type === 'shape' && d.shape === 'line';
@@ -902,7 +966,7 @@ export function PageCanvas() {
         if (ok) {
           const el = isLine ? { ...d, width: Math.max(d.width, 1), height: Math.max(d.height, 1) } : d;
           addElement(page.id, el);
-          setTool('select');
+          if (!keepActive) setTool('select');
         }
         return null;
       });
@@ -1142,15 +1206,13 @@ export function PageCanvas() {
   const startDrawing = (start: { x: number; y: number }) => {
     if (!page) return;
     // Capture the pen's style once at the gesture start so the live preview and the
-    // committed stroke are identical: colour, thickness, opacity, marker (translucent
-    // Multiply) vs. pen, and the dash pattern (pen only).
-    const marker = tool.drawStyle === 'marker';
+    // committed stroke are identical: colour, thickness, opacity and dash pattern.
     const style = {
       color: tool.drawColor,
       strokeWidth: tool.drawWidth,
       opacity: Math.max(0.05, Math.min(1, tool.drawOpacity)),
-      highlight: marker,
-      dash: (marker ? 'solid' : tool.drawDash) as 'solid' | 'dashed' | 'dotted',
+      highlight: false,
+      dash: tool.drawDash,
     };
     const points: { x: number; y: number }[] = [start];
     const bounds = () => {
@@ -1264,6 +1326,7 @@ export function PageCanvas() {
       color,
       lineHeight: 1.15,
       embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
+      fontLabel: run.fontLabel, // carry the real name so the inspector shows it
     });
     setPickedRun(null);
     setTool('text'); // arm placement; the next click drops the field in this font
@@ -1331,6 +1394,14 @@ export function PageCanvas() {
 
           {draft && <DraftView el={draft} scale={scale} />}
 
+          {/* Rubber-band selection rectangle (select tool). */}
+          {marquee && (
+            <div
+              className="marquee"
+              style={{ left: marquee.x * scale, top: marquee.y * scale, width: marquee.width * scale, height: marquee.height * scale }}
+            />
+          )}
+
           {/* Alignment guides: horizontal lights up on a shared baseline, vertical on a
               shared left edge — pure confirmation of the snap that just engaged. */}
           {alignGuideY != null && <div className="align-guide" style={{ top: alignGuideY * scale }} />}
@@ -1367,6 +1438,14 @@ export function PageCanvas() {
 
 function nextZ(page: EditorPage): number {
   return page.elements.reduce((m, e) => Math.max(m, e.z), 0) + 1;
+}
+
+/** Axis-aligned overlap test between the marquee and an element's box (view-points). */
+function rectsIntersect(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
 /** Lightweight preview while dragging out a new shape / stroke. */

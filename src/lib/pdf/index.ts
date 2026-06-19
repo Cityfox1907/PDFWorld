@@ -29,6 +29,7 @@ export {
   cssStackFor,
   fontFileUrl,
   matchCatalogFontKey,
+  fontDisplayName,
   injectFontFaces,
 } from './fontCatalog';
 export type { FontDef } from './fontCatalog';

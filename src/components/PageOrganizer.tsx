@@ -12,7 +12,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useStore, visibleSize, type EditorPage } from '../state/store';
 import { useUI } from '../state/ui';
 import { renderPageToCanvas } from '../lib/pdf';
-import { X, RotateCw, Copy, Trash2, Plus } from 'lucide-react';
+import { X, RotateCw, Copy, Trash2, Plus, FilePlus2 } from 'lucide-react';
 
 const DPR = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2.5);
 
@@ -119,6 +119,8 @@ export function PageOrganizer() {
   const pages = useStore((s) => s.pages);
   const reorderPages = useStore((s) => s.reorderPages);
   const insertBlankAfter = useStore((s) => s.insertBlankAfter);
+  const mergeFile = useStore((s) => s.mergeFile);
+  const mergeRef = useRef<HTMLInputElement>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -154,9 +156,23 @@ export function PageOrganizer() {
           <button className="btn ghost" onClick={() => insertBlankAfter(null)}>
             <Plus size={16} /> Leere Seite
           </button>
+          <button className="btn ghost" onClick={() => mergeRef.current?.click()} title="Ein weiteres PDF ans Ende anfügen">
+            <FilePlus2 size={16} /> PDF anfügen
+          </button>
           <button className="btn primary" onClick={() => setOrganizer(false)}>
             <X size={16} /> Fertig
           </button>
+          <input
+            ref={mergeRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void mergeFile(f);
+              e.target.value = '';
+            }}
+          />
         </div>
       </div>
       <div className="organizer-grid-wrap">

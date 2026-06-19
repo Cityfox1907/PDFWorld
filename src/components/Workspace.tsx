@@ -19,6 +19,7 @@ export function Workspace() {
   const selectedElementId = useStore((s) => s.selectedElementId);
   const currentPageId = useStore((s) => s.currentPageId);
   const deleteElement = useStore((s) => s.deleteElement);
+  const deleteElements = useStore((s) => s.deleteElements);
   const duplicateElement = useStore((s) => s.duplicateElement);
   const copyElement = useStore((s) => s.copyElement);
   const pasteElement = useStore((s) => s.pasteElement);
@@ -78,7 +79,9 @@ export function Workspace() {
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedElementId && currentPageId) {
         e.preventDefault();
-        deleteElement(currentPageId, selectedElementId);
+        const ids = useStore.getState().selectedElementIds;
+        if (ids.length > 1) deleteElements(currentPageId, ids);
+        else deleteElement(currentPageId, selectedElementId);
         return;
       }
       const map: Record<string, Parameters<typeof setTool>[0]> = {
@@ -98,7 +101,7 @@ export function Workspace() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, setTool, selectedElementId, currentPageId, deleteElement, duplicateElement, copyElement, pasteElement, openSaveDialog]);
+  }, [undo, redo, setTool, selectedElementId, currentPageId, deleteElement, deleteElements, duplicateElement, copyElement, pasteElement, openSaveDialog]);
 
   return (
     <div className="workspace">

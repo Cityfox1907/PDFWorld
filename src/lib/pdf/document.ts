@@ -102,7 +102,9 @@ export class PdfEngine {
   /** Produce the final, edited PDF bytes for download. */
   async export(specs: ExportPageSpec[], options: ExportOptions = {}): Promise<Uint8Array> {
     const usedKeys = new Set(specs.map((s) => s.sourceKey).filter((k) => k !== BLANK_SOURCE));
-    const identity = isIdentityArrangement(specs, this.main.pageCount) && usedKeys.size <= 1;
+    // A new document with no source PDF (only blank pages) always takes the rebuild
+    // path, which assembles fresh blank pages and bakes the overlays onto them.
+    const identity = this.hasMain() && isIdentityArrangement(specs, this.main.pageCount) && usedKeys.size <= 1;
 
     if (identity) {
       const fresh = await PDFDocument.load(this.main.bytes, { ignoreEncryption: true, updateMetadata: false });

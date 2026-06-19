@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore, type ToolId, type ToolDefaults } from '../state/store';
 import type { AnyElement, ElementPatch, TextElement, ShapeElement, CalloutElement, ImageElement, InkElement, ShapeKind } from '../lib/pdf';
 import { isStrokeOnlyShape } from '../lib/pdf';
+import { uid } from '../lib/utils/id';
 import { inkDashArray } from '../lib/utils/ink';
 import { FontPicker } from './FontPicker';
 import { ColorPicker } from './ColorPicker';
@@ -38,7 +39,6 @@ import {
   List,
   ListOrdered,
   Crop,
-  Wand2,
   Eraser,
   Image as ImageIcon,
   PenTool,
@@ -147,9 +147,13 @@ export function Inspector() {
   const pages = useStore((s) => s.pages);
   const currentPageId = useStore((s) => s.currentPageId);
   const selectedId = useStore((s) => s.selectedElementId);
+  const selectedIds = useStore((s) => s.selectedElementIds);
   const updateElement = useStore((s) => s.updateElement);
   const deleteElement = useStore((s) => s.deleteElement);
+  const deleteElements = useStore((s) => s.deleteElements);
   const duplicateElement = useStore((s) => s.duplicateElement);
+  const addElements = useStore((s) => s.addElements);
+  const selectElements = useStore((s) => s.selectElements);
   const reorderElement = useStore((s) => s.reorderElement);
   const commit = useStore((s) => s.commit);
   const tool = useStore((s) => s.tool);
@@ -163,6 +167,39 @@ export function Inspector() {
     updateElement(page.id, el.id, patch);
     if (doCommit) commit();
   };
+
+  // When several elements are selected (marquee / shift-click) show a compact group
+  // panel: they move together by dragging any of them, and can be duplicated or deleted
+  // in one step.
+  if (page && selectedIds.length > 1) {
+    const chosen = page.elements.filter((e) => selectedIds.includes(e.id));
+    if (chosen.length > 1) {
+      const duplicateAll = () => {
+        const copies = chosen.map((e) => ({ ...structuredClone(e), id: uid('el'), x: e.x + 12, y: e.y + 12, locked: false } as AnyElement));
+        const ids = copies.map((c) => c.id);
+        addElements(page.id, copies, ids[ids.length - 1]);
+        selectElements(ids);
+      };
+      return (
+        <aside className="inspector">
+          <Header icon={MousePointer2} title={`${chosen.length} Elemente`} />
+          <Group title="Mehrfachauswahl">
+            <p className="insp-tip" style={{ marginTop: 0 }}>
+              Ziehe ein Element, um alle gemeinsam zu verschieben. Mit Shift-Klick einzelne hinzufügen oder entfernen.
+            </p>
+            <div className="insp-actions">
+              <button className="btn ghost" onClick={duplicateAll}>
+                <Copy size={15} /> Duplizieren
+              </button>
+              <button className="btn ghost danger" onClick={() => deleteElements(page.id, selectedIds)}>
+                <Trash2 size={15} /> Löschen
+              </button>
+            </div>
+          </Group>
+        </aside>
+      );
+    }
+  }
 
   if (el) {
     const meta = ELEMENT_META[el.type];
@@ -341,25 +378,9 @@ function ToolSettings({
   }
 
   if (activeTool === 'draw') {
-    const marker = tool.drawStyle === 'marker';
+    // The draw tool is a pure pen — colour, thickness, opacity and line style.
     return (
       <Group>
-        <Row>
-          <div className="seg insp-seg">
-            <button
-              className={`seg-btn ${!marker ? 'active' : ''}`}
-              onClick={() => setToolDefaults({ drawStyle: 'pen', drawOpacity: 1 })}
-            >
-              Stift
-            </button>
-            <button
-              className={`seg-btn ${marker ? 'active' : ''}`}
-              onClick={() => setToolDefaults({ drawStyle: 'marker', drawOpacity: 0.4 })}
-            >
-              Marker
-            </button>
-          </div>
-        </Row>
         <Row>
           <label>Farbe</label>
           <ColorPicker title="Linienfarbe" value={tool.drawColor} onChange={(c) => setToolDefaults({ drawColor: c })} />
@@ -374,19 +395,17 @@ function ToolSettings({
           <input type="range" min={0.1} max={1} step={0.05} value={tool.drawOpacity} onChange={(e) => setToolDefaults({ drawOpacity: Number(e.target.value) })} />
           <span className="insp-val">{Math.round(tool.drawOpacity * 100)}%</span>
         </Row>
-        {!marker && (
-          <Row>
-            <label>Stil</label>
-            <div className="seg insp-seg">
-              {(['solid', 'dashed', 'dotted'] as const).map((d) => (
-                <button key={d} className={`seg-btn ${tool.drawDash === d ? 'active' : ''}`} onClick={() => setToolDefaults({ drawDash: d })}>
-                  {d === 'solid' ? 'Voll' : d === 'dashed' ? 'Strich' : 'Punkt'}
-                </button>
-              ))}
-            </div>
-          </Row>
-        )}
-        <StrokePreview color={tool.drawColor} width={tool.drawWidth} opacity={tool.drawOpacity} dash={tool.drawDash} marker={marker} />
+        <Row>
+          <label>Stil</label>
+          <div className="seg insp-seg">
+            {(['solid', 'dashed', 'dotted'] as const).map((d) => (
+              <button key={d} className={`seg-btn ${tool.drawDash === d ? 'active' : ''}`} onClick={() => setToolDefaults({ drawDash: d })}>
+                {d === 'solid' ? 'Voll' : d === 'dashed' ? 'Strich' : 'Punkt'}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <StrokePreview color={tool.drawColor} width={tool.drawWidth} opacity={tool.drawOpacity} dash={tool.drawDash} marker={false} />
       </Group>
     );
   }
@@ -499,17 +518,35 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
   // captured original-font binding and let the chosen family/style take effect.
   return (
     <Group title="Schrift">
+      {el.embeddedFontId && el.fontLabel && (
+        <p className="insp-note" style={{ marginTop: 0 }}>
+          ✓ Originalschrift: <strong>{el.fontLabel}</strong> (1:1)
+        </p>
+      )}
       <Row>
-        <FontPicker value={el.family} onChange={(family) => set({ family, embeddedFontId: undefined })} />
+        <FontPicker value={el.family} onChange={(family) => set({ family, embeddedFontId: undefined, fontLabel: undefined })} />
       </Row>
-      {el.embeddedFontId && <p className="insp-note">✓ Originalschrift des Dokuments (1:1)</p>}
+      {el.embeddedFontId && !el.fontLabel && <p className="insp-note">✓ Originalschrift des Dokuments (1:1)</p>}
       <Row>
-        <input className="field field-sm" type="number" min={4} max={400} value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />
+        <input
+          className="field field-sm"
+          type="number"
+          min={4}
+          max={400}
+          value={el.size}
+          // Grow the box together with the type: the field never clips its text when
+          // the size is increased (width & height scale linearly with the font size).
+          onChange={(e) => {
+            const size = Math.max(1, Number(e.target.value) || el.size);
+            const ratio = size / (el.size || size);
+            set({ size, width: el.width * ratio, height: el.height * ratio });
+          }}
+        />
         <ColorPicker title="Schriftfarbe" value={el.color} onChange={(c) => set({ color: c })} />
-        <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold, embeddedFontId: undefined })} title="Fett">
+        <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold, embeddedFontId: undefined, fontLabel: undefined })} title="Fett">
           <Bold size={15} />
         </button>
-        <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic, embeddedFontId: undefined })} title="Kursiv">
+        <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic, embeddedFontId: undefined, fontLabel: undefined })} title="Kursiv">
           <Italic size={15} />
         </button>
       </Row>
@@ -554,16 +591,6 @@ function InkProps({ el, set, commit }: { el: InkElement; set: (p: ElementPatch, 
   const marker = !!el.highlight;
   return (
     <Group title={marker ? 'Marker' : 'Zeichnung'}>
-      <Row>
-        <div className="seg insp-seg">
-          <button className={`seg-btn ${!marker ? 'active' : ''}`} onClick={() => set({ highlight: false })}>
-            Stift
-          </button>
-          <button className={`seg-btn ${marker ? 'active' : ''}`} onClick={() => set({ highlight: true })}>
-            Marker
-          </button>
-        </div>
-      </Row>
       <Row>
         <label>Farbe</label>
         <ColorPicker title={marker ? 'Markerfarbe' : 'Linienfarbe'} value={el.color} onChange={(c) => set({ color: c })} />
@@ -741,11 +768,8 @@ function ImageProps({ el, set }: { el: ImageElement; set: (p: ElementPatch) => v
   return (
     <Group title="Bild">
       <div className="insp-actions" style={{ marginBottom: 12 }}>
-        <button className="btn ghost" onClick={() => editImage(el.id, 'crop')}>
+        <button className="btn ghost insp-wide" onClick={() => editImage(el.id)}>
           <Crop size={15} /> Zuschneiden
-        </button>
-        <button className="btn ghost" onClick={() => editImage(el.id, 'bg')}>
-          <Wand2 size={15} /> Hintergrund
         </button>
       </div>
       <Row>

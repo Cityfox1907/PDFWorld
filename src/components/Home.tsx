@@ -1,16 +1,17 @@
 import { useCallback, useRef, useState } from 'react';
 import { useStore } from '../state/store';
-import { FileUp, ScanText, Paintbrush, Type, Layers, ShieldCheck, Loader2 } from 'lucide-react';
+import { FileUp, FilePlus2, ScanText, Paintbrush, Type, Layers, ShieldCheck, Loader2 } from 'lucide-react';
 
 const FEATURES = [
   { icon: ScanText, title: 'Text scannen & bearbeiten', desc: 'Bestehenden Text antippen — Schrift, Grösse, Stil und Farbe werden automatisch erkannt und übernommen.' },
   { icon: Paintbrush, title: 'Hintergrund-Pinsel', desc: 'Nimmt die exakte Hintergrundfarbe auf und überdeckt Inhalte unsichtbar.' },
   { icon: Layers, title: 'Seiten verwalten & zoomen', desc: 'Zusammenführen, sortieren, drehen — und flüssig, scharf in die Seite hineinzoomen.' },
-  { icon: Type, title: '40 Schriftarten & Signatur', desc: 'Aus 40 beliebten Schriften wählen, unterschreiben und Bilder platzieren.' },
+  { icon: Type, title: 'Über 150 Schriftarten & Signatur', desc: 'Schriften aus einer grossen Datenbank wählen, unterschreiben und Bilder platzieren.' },
 ];
 
 export function Home() {
   const loadFile = useStore((s) => s.loadFile);
+  const newDocument = useStore((s) => s.newDocument);
   const status = useStore((s) => s.status);
   const error = useStore((s) => s.error);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -75,6 +76,18 @@ export function Home() {
             }}
           />
         </div>
+
+        <div className="home-or">
+          <span>oder</span>
+        </div>
+
+        <button className="home-blank" onClick={() => void newDocument()} disabled={loading}>
+          <FilePlus2 size={18} />
+          <span>
+            <span className="home-blank-title">Leere Seite öffnen</span>
+            <span className="home-blank-sub">Mit einem leeren A4-Blatt beginnen</span>
+          </span>
+        </button>
 
         {error && <div className="home-error">{error}</div>}
 

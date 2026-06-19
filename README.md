@@ -117,10 +117,10 @@ die bestehenden Seiten eingezeichnet.
 ### 3. Oberfläche
 - **Logo = Home** – ein Klick auf das **PDFWorld**-Logo oben links führt zurück
   zur Startseite
-- **Scrollen wechselt die Seite** – am Seitenrand weiter zu scrollen springt zur
-  nächsten/vorherigen Seite. Ein **Umschalter neben dem Design-Schalter** wählt
-  zwischen **Seite für Seite** (Standard, ein klarer Sprung pro Geste) und
-  **fliessend** (der Wechsel läuft direkt weiter)
+- **Scrollen wechselt die Seite** – am Seitenrand weiter zu scrollen blättert
+  **eine Seite weiter** (vor/zurück): **genau eine Seite pro Scroll-Geste** (eine
+  leichte Bewegung springt nie mehrere Seiten), mit einem **geschmeidigen, sanft
+  einblendenden Übergang** zur nächsten Seite
 - **Helles & dunkles Design** (umschaltbar, merkt sich die Wahl)
 - **Zoom bis 2000 %** – per Lupen-Buttons (zoomt auf die **Mitte des sichtbaren
   Fensters**) oder ⌘/Strg + Mausrad bzw. Trackpad-Pinch (zoomt **genau dort, wo der

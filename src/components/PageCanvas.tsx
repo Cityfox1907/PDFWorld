@@ -100,6 +100,10 @@ export function PageCanvas() {
   const [draft, setDraft] = useState<AnyElement | null>(null);
   // Rubber-band selection rectangle (view-points) drawn with the select tool.
   const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  // Touch two-tap selection: the first corner the user tapped (view-points). A drag-
+  // marquee is unreliable on touch (the browser keeps stealing the gesture as a pan), so
+  // on a finger the select tool collects two opposite corners instead — tap, then tap.
+  const [tapCorner, setTapCorner] = useState<{ x: number; y: number } | null>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [scanId, setScanId] = useState(0);
   // Scan tool: the line whose font panel is open, plus its sampled colours.
@@ -131,7 +135,22 @@ export function PageCanvas() {
     setAlignGuideX(null);
     setScanBaselines([]);
     setScanLeftEdges([]);
+    setTapCorner(null);
   }, [pageId]);
+
+  // An armed two-tap selection corner only makes sense while the select tool is active —
+  // switching to any other tool abandons it so a stray first corner never lingers.
+  useEffect(() => {
+    if (activeTool !== 'select') setTapCorner(null);
+  }, [activeTool]);
+
+  // If a selection is made another way while a corner is armed (e.g. tapping an element
+  // directly), drop the stale corner so the next empty-space tap doesn't build a rectangle
+  // from it. Reading the store directly keeps this independent of the marquee/tap flow.
+  const selectedElementId = useStore((s) => s.selectedElementId);
+  useEffect(() => {
+    if (selectedElementId && tapCorner) setTapCorner(null);
+  }, [selectedElementId, tapCorner]);
 
   // Fit the page to the available area whenever the page or viewport changes.
   useLayoutEffect(() => {
@@ -386,7 +405,10 @@ export function PageCanvas() {
         });
         if (!cancelled) setRuns(enriched);
       } catch {
-        if (!cancelled) setRuns([]);
+        if (!cancelled) {
+          setRuns([]);
+          showToast('Text konnte nicht gescannt werden. Bitte erneut versuchen.', 'error');
+        }
       }
     })();
     return () => {
@@ -673,19 +695,34 @@ export function PageCanvas() {
     const start = evToView(e);
 
     if (activeTool === 'select') {
-      // Clicking empty space discards an abandoned, never-filled text box, then starts a
-      // rubber-band marquee: drag across the page to select every element it touches.
+      // Clicking empty space discards an abandoned, never-filled text box first.
       const selId = useStore.getState().selectedElementId;
       if (selId) {
         const selEl = page.elements.find((el) => el.id === selId);
         if (isAbandonedText(selEl)) deleteElement(page.id, selId);
+      }
+      // On TOUCH a drag-marquee is unreliable (the browser keeps reinterpreting the finger
+      // drag as a pan, cutting the selection short), so collect two opposite corners with
+      // two taps instead: first tap drops a corner, second tap closes the rectangle and
+      // selects everything inside it. On a mouse the familiar drag-marquee is kept.
+      if (e.pointerType === 'touch') {
+        commitTapSelection(start, e.shiftKey);
+        return;
       }
       if (!e.shiftKey) selectElement(null);
       startMarquee(start, e);
       return;
     }
     if (activeTool === 'edit-text') {
-      // Clicking empty space leaves the current in-place edit; the line boxes stay.
+      // A tap on (or near) a detected line opens that line's font panel. Resolving the
+      // nearest run here — at the overlay level, with a generous fingertip slack — means a
+      // tap lands the right line even when the boxes are tiny on a phone (a direct hit on
+      // a RunBox is still handled by the box itself). A tap on bare paper just clears.
+      const idx = nearestRunIndex(start);
+      if (idx != null) {
+        pickRun(idx);
+        return;
+      }
       setEditingId(null);
       setPickedRun(null);
       selectElement(null);
@@ -789,6 +826,63 @@ export function PageCanvas() {
       return;
     }
     startShape(start, e);
+  };
+
+  // ── select tool (touch): two-tap rectangle selection ──
+  // First tap on empty space arms a corner (and clears any current selection); the second
+  // tap closes the rectangle and selects every element it touches. Shift keeps the prior
+  // selection so a second rectangle can add to it. A degenerate (near-zero) rectangle just
+  // clears, so a stray double-tap never selects the whole page.
+  const commitTapSelection = (pt: { x: number; y: number }, additive: boolean) => {
+    if (!page) return;
+    if (!tapCorner) {
+      if (!additive) selectElement(null);
+      setTapCorner(pt);
+      showToast('Auswahl: jetzt die gegenüberliegende Ecke antippen', 'info');
+      return;
+    }
+    const rect = {
+      x: Math.min(tapCorner.x, pt.x),
+      y: Math.min(tapCorner.y, pt.y),
+      width: Math.abs(pt.x - tapCorner.x),
+      height: Math.abs(pt.y - tapCorner.y),
+    };
+    setTapCorner(null);
+    if (rect.width < 4 && rect.height < 4) {
+      selectElement(null);
+      return;
+    }
+    const ids = page.elements.filter((el) => !el.hidden && rectsIntersect(rect, el)).map((el) => el.id);
+    if (ids.length) {
+      const prev = additive ? useStore.getState().selectedElementIds : [];
+      selectElements([...prev, ...ids]);
+      showToast(`${ids.length} Element${ids.length === 1 ? '' : 'e'} ausgewählt`, 'success');
+    } else {
+      selectElement(null);
+      showToast('Keine Elemente im gewählten Bereich', 'info');
+    }
+  };
+
+  // The detected line nearest a tap point (view-points), within a finger-sized slack, or
+  // null if the tap was on bare paper. Lets the scan tool pick the right line even when
+  // the boxes are small and tightly stacked on a phone screen.
+  const nearestRunIndex = (pt: { x: number; y: number }): number | null => {
+    const pad = 14 / scale;
+    let best: number | null = null;
+    let bestDist = Infinity;
+    runs.forEach((run, i) => {
+      if (runIsTaken(run)) return;
+      const w = Math.max(run.width, 24);
+      if (pt.x < run.x - pad || pt.x > run.x + w + pad || pt.y < run.y - pad || pt.y > run.y + run.height + pad) return;
+      const cx = run.x + w / 2;
+      const cy = run.y + run.height / 2;
+      const d = Math.hypot(pt.x - cx, pt.y - cy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    });
+    return best;
   };
 
   // ── select tool: rubber-band marquee over empty page space ──
@@ -1508,6 +1602,11 @@ export function PageCanvas() {
               className="marquee"
               style={{ left: marquee.x * scale, top: marquee.y * scale, width: marquee.width * scale, height: marquee.height * scale }}
             />
+          )}
+
+          {/* First corner of a touch two-tap selection — the next tap closes the box. */}
+          {tapCorner && activeTool === 'select' && (
+            <div className="tap-corner" style={{ left: tapCorner.x * scale, top: tapCorner.y * scale }} />
           )}
 
           {/* Alignment guides: horizontal lights up on a shared baseline, vertical on a

@@ -10,9 +10,10 @@ import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { makeToPdfPoint, placeBox, placeRotatedBox } from '../src/lib/pdf/coords.ts';
 import { exportInPlace, exportRebuild, isIdentityArrangement, BLANK_SOURCE, type ExportPageSpec } from '../src/lib/pdf/pages.ts';
 import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf, matchCatalogFontKey } from '../src/lib/pdf/fontCatalog.ts';
-import { classifyFont, prettyFontName } from '../src/lib/pdf/fonts.ts';
+import { classifyFont, prettyFontName, firstBaselineOffset } from '../src/lib/pdf/fonts.ts';
+import { shapeOutline, isStrokeOnlyShape } from '../src/lib/pdf/shapes.ts';
 import { registerEmbeddedFont, getEmbeddedFont, embeddedFontFamily } from '../src/lib/pdf/embeddedFonts.ts';
-import type { AnyElement } from '../src/lib/pdf/types.ts';
+import type { AnyElement, ShapeKind } from '../src/lib/pdf/types.ts';
 
 let passed = 0;
 let failed = 0;
@@ -355,6 +356,63 @@ async function run(): Promise<void> {
     ok('form flattened (no fields remain)', reread.getForm().getFields().length === 0);
     const text = await extractText(out);
     ok('filled value Fikret baked into page', text[0].includes('Fikret'));
+  }
+
+  // ── text baseline calibration (the alignment-guide fix) ──
+  console.log('\ntext baseline (alignment-guide calibration)');
+  {
+    // With a single-spaced line the baseline is just the font ascent below the top…
+    ok('lineHeight 1 → baseline = size·0.8', approx(firstBaselineOffset(10, 1), 8));
+    // …and a roomier line adds half its extra leading, matching the browser's line-box
+    // (so the on-screen guide sits exactly on the letters it aligns).
+    ok('lineHeight 1.3 → baseline = size·0.95', approx(firstBaselineOffset(10, 1.3), 9.5));
+    ok('baseline grows with size', approx(firstBaselineOffset(20, 1.2), 20 * (0.1 + 0.8)));
+  }
+
+  // ── vector shapes: geometry + lossless bake for every kind ──
+  console.log('\nElemente shapes (geometry + bake)');
+  {
+    const kinds: ShapeKind[] = [
+      'triangle', 'right-triangle', 'diamond', 'pentagon', 'hexagon', 'octagon',
+      'parallelogram', 'trapezoid', 'star', 'heart', 'cloud', 'cross', 'chevron',
+      'arrow', 'double-arrow', 'line',
+    ];
+    let geomOk = true;
+    for (const k of kinds) {
+      const { points, closed } = shapeOutline(k, 10, 20, 120, 80);
+      const enough = points.length >= 2;
+      const finite = points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+      const inBox = points.every((p) => p.x >= 9 && p.x <= 131 && p.y >= 19 && p.y <= 101);
+      const closedRight = k === 'line' ? !closed : closed;
+      if (!enough || !finite || !inBox || !closedRight) {
+        geomOk = false;
+        console.log(`    (shape ${k}: pts=${points.length} closed=${closed} inBox=${inBox} finite=${finite})`);
+      }
+    }
+    ok('every shape outlines within its box, finite points, correct closure', geomOk);
+    ok('only the line is stroke-only', isStrokeOnlyShape('line') && !isStrokeOnlyShape('heart') && !isStrokeOnlyShape('hexagon'));
+
+    const fresh = await PDFDocument.load(await makeSamplePdf(['SHP']));
+    const els: AnyElement[] = kinds.map((k, i) => ({
+      id: `sh${i}`,
+      type: 'shape',
+      x: 20 + (i % 4) * 90,
+      y: 40 + Math.floor(i / 4) * 90,
+      width: 70,
+      height: 60,
+      opacity: 1,
+      z: i + 1,
+      shape: k,
+      fill: isStrokeOnlyShape(k) ? null : '#cfe8ff',
+      stroke: '#0a3d62',
+      strokeWidth: 1.5,
+      dash: 'solid',
+    }) as AnyElement);
+    const out = await exportInPlace(fresh, [{ sourceKey: 'main', sourceIndex: 0, addedRotation: 0, elements: els }], {});
+    const reread = await PDFDocument.load(out);
+    ok('document with every shape kind still loads', reread.getPageCount() === 1);
+    const text = await extractText(out);
+    ok('original page content survives the shapes', text[0].includes('SHP'));
   }
 
   console.log(`\n\x1b[1mResult:\x1b[0m \x1b[32m${passed} passed\x1b[0m, ${failed ? `\x1b[31m${failed} failed\x1b[0m` : '0 failed'}\n`);

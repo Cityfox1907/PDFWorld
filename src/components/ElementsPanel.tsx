@@ -36,7 +36,24 @@ function elementLabel(el: AnyElement): string {
     case 'ellipse':
       return 'Ellipse';
     case 'shape': {
-      const names: Record<string, string> = { triangle: 'Dreieck', diamond: 'Raute', star: 'Stern', arrow: 'Pfeil', line: 'Linie' };
+      const names: Record<string, string> = {
+        triangle: 'Dreieck',
+        'right-triangle': 'Rechtw. Dreieck',
+        diamond: 'Raute',
+        pentagon: 'Fünfeck',
+        hexagon: 'Sechseck',
+        octagon: 'Achteck',
+        parallelogram: 'Parallelogramm',
+        trapezoid: 'Trapez',
+        star: 'Stern',
+        heart: 'Herz',
+        cloud: 'Wolke',
+        cross: 'Kreuz',
+        chevron: 'Chevron',
+        arrow: 'Pfeil',
+        'double-arrow': 'Doppelpfeil',
+        line: 'Linie',
+      };
       return names[el.shape] ?? 'Form';
     }
     case 'callout': {

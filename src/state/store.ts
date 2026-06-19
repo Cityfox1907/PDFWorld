@@ -183,9 +183,18 @@ interface StoreState {
 
   // ── pages ──
   reorderPages: (fromIndex: number, toIndex: number) => void;
+  /** Move a set of pages (kept in their current order) as one block in front of
+   *  `beforeId`, or to the end when `beforeId` is null. One history step. */
+  movePages: (ids: string[], beforeId: string | null) => void;
   deletePage: (id: string) => void;
+  /** Delete several pages in ONE history step (never the very last remaining page). */
+  deletePages: (ids: string[]) => void;
   duplicatePage: (id: string) => void;
+  /** Duplicate several pages in ONE history step; the copies follow the block. */
+  duplicatePages: (ids: string[]) => void;
   rotatePage: (id: string, delta: number) => void;
+  /** Rotate several pages in ONE history step. */
+  rotatePages: (ids: string[], delta: number) => void;
   insertBlankAfter: (id: string | null) => void;
 
   // ── forms ──
@@ -556,6 +565,25 @@ export const useStore = create<StoreState>((set, get) => ({
       return { pages };
     });
   },
+  movePages(ids, beforeId) {
+    const idSet = new Set(ids);
+    if (!idSet.size) return;
+    get().commit();
+    set((s) => {
+      // Keep the moved pages in their current relative order.
+      const moving = s.pages.filter((p) => idSet.has(p.id));
+      const rest = s.pages.filter((p) => !idSet.has(p.id));
+      if (!moving.length) return s;
+      let at = beforeId ? rest.findIndex((p) => p.id === beforeId) : rest.length;
+      if (at < 0) at = rest.length;
+      // Dragging the block downward: insert AFTER the target so it lands where dropped.
+      const firstMovingIdx = s.pages.findIndex((p) => idSet.has(p.id));
+      const overIdx = beforeId ? s.pages.findIndex((p) => p.id === beforeId) : s.pages.length;
+      if (firstMovingIdx < overIdx) at += 1;
+      rest.splice(at, 0, ...moving);
+      return { pages: rest };
+    });
+  },
   deletePage(id) {
     if (get().pages.length <= 1) {
       get().showToast('Die letzte Seite kann nicht gelöscht werden.', 'error');
@@ -566,6 +594,22 @@ export const useStore = create<StoreState>((set, get) => ({
       const idx = s.pages.findIndex((p) => p.id === id);
       const pages = s.pages.filter((p) => p.id !== id);
       const currentPageId = s.currentPageId === id ? pages[Math.min(idx, pages.length - 1)]?.id ?? null : s.currentPageId;
+      return { pages, currentPageId, selectedElementId: null, selectedElementIds: [] };
+    });
+  },
+  deletePages(ids) {
+    const idSet = new Set(ids);
+    if (!idSet.size) return;
+    if (get().pages.every((p) => idSet.has(p.id))) {
+      get().showToast('Es muss mindestens eine Seite übrig bleiben.', 'error');
+      return;
+    }
+    get().commit();
+    set((s) => {
+      const firstIdx = s.pages.findIndex((p) => idSet.has(p.id));
+      const pages = s.pages.filter((p) => !idSet.has(p.id));
+      const currentGone = s.currentPageId != null && idSet.has(s.currentPageId);
+      const currentPageId = currentGone ? pages[Math.min(firstIdx, pages.length - 1)]?.id ?? null : s.currentPageId;
       return { pages, currentPageId, selectedElementId: null, selectedElementIds: [] };
     });
   },
@@ -581,10 +625,35 @@ export const useStore = create<StoreState>((set, get) => ({
       return { pages };
     });
   },
+  duplicatePages(ids) {
+    const idSet = new Set(ids);
+    if (!idSet.size) return;
+    get().commit();
+    set((s) => {
+      // Insert all copies (in page order) right after the last selected page.
+      const ordered = s.pages.filter((p) => idSet.has(p.id));
+      const copies = ordered.map((src) => ({ ...structuredClone(src), id: uid('pg') }) as EditorPage);
+      let lastIdx = -1;
+      s.pages.forEach((p, i) => {
+        if (idSet.has(p.id)) lastIdx = i;
+      });
+      const pages = [...s.pages];
+      pages.splice(lastIdx + 1, 0, ...copies);
+      return { pages };
+    });
+  },
   rotatePage(id, delta) {
     get().commit();
     set((s) => ({
       pages: s.pages.map((p) => (p.id === id ? { ...p, addedRotation: (((p.addedRotation + delta) % 360) + 360) % 360 } : p)),
+    }));
+  },
+  rotatePages(ids, delta) {
+    const idSet = new Set(ids);
+    if (!idSet.size) return;
+    get().commit();
+    set((s) => ({
+      pages: s.pages.map((p) => (idSet.has(p.id) ? { ...p, addedRotation: (((p.addedRotation + delta) % 360) + 360) % 360 } : p)),
     }));
   },
   insertBlankAfter(id) {

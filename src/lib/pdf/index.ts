@@ -20,6 +20,7 @@ export {
   isInternalFontName,
   FontStore,
   BASELINE_RATIO,
+  firstBaselineOffset,
 } from './fonts';
 export {
   FONT_CATALOG,

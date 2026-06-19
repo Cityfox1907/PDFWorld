@@ -4,6 +4,7 @@ import { useUI } from '../state/ui';
 import type { ToolId } from '../state/store';
 import type { ImageElement, ShapeKind } from '../lib/pdf';
 import { uid } from '../lib/utils/id';
+import { loadEmbeddableImage } from '../lib/utils/file';
 import {
   MousePointer2,
   ScanText,
@@ -15,9 +16,18 @@ import {
   Square,
   Circle,
   Triangle,
+  TriangleRight,
   Diamond,
+  Pentagon,
+  Hexagon,
+  Octagon,
   Star,
+  Heart,
+  Cloud,
+  Plus,
+  ChevronRight,
   ArrowRight,
+  ArrowLeftRight,
   Minus,
   Shapes,
   Eraser,
@@ -26,6 +36,7 @@ import {
   Layers,
   type LucideIcon,
 } from 'lucide-react';
+import { ParallelogramIcon, TrapezoidIcon } from './shapeIcons';
 
 interface ToolDef {
   id: ToolId;
@@ -57,9 +68,20 @@ const SHAPES: ShapeChoice[] = [
   { tool: 'rect', icon: Square, label: 'Rechteck' },
   { tool: 'ellipse', icon: Circle, label: 'Ellipse' },
   { tool: 'shape', shapeKind: 'triangle', icon: Triangle, label: 'Dreieck' },
+  { tool: 'shape', shapeKind: 'right-triangle', icon: TriangleRight, label: 'Rechtw. Dreieck' },
   { tool: 'shape', shapeKind: 'diamond', icon: Diamond, label: 'Raute' },
+  { tool: 'shape', shapeKind: 'pentagon', icon: Pentagon, label: 'Fünfeck' },
+  { tool: 'shape', shapeKind: 'hexagon', icon: Hexagon, label: 'Sechseck' },
+  { tool: 'shape', shapeKind: 'octagon', icon: Octagon, label: 'Achteck' },
+  { tool: 'shape', shapeKind: 'parallelogram', icon: ParallelogramIcon, label: 'Parallelogramm' },
+  { tool: 'shape', shapeKind: 'trapezoid', icon: TrapezoidIcon, label: 'Trapez' },
   { tool: 'shape', shapeKind: 'star', icon: Star, label: 'Stern' },
+  { tool: 'shape', shapeKind: 'heart', icon: Heart, label: 'Herz' },
+  { tool: 'shape', shapeKind: 'cloud', icon: Cloud, label: 'Wolke' },
+  { tool: 'shape', shapeKind: 'cross', icon: Plus, label: 'Kreuz' },
+  { tool: 'shape', shapeKind: 'chevron', icon: ChevronRight, label: 'Chevron' },
   { tool: 'shape', shapeKind: 'arrow', icon: ArrowRight, label: 'Pfeil' },
+  { tool: 'shape', shapeKind: 'double-arrow', icon: ArrowLeftRight, label: 'Doppelpfeil' },
   { tool: 'shape', shapeKind: 'line', icon: Minus, label: 'Linie' },
 ];
 
@@ -133,45 +155,43 @@ export function ToolRail() {
   const addElement = useStore((s) => s.addElement);
   const pages = useStore((s) => s.pages);
   const currentPageId = useStore((s) => s.currentPageId);
+  const showToast = useStore((s) => s.showToast);
   const openSignature = useUI((s) => s.openSignature);
   const elementsPanelOpen = useUI((s) => s.elementsPanelOpen);
   const toggleElementsPanel = useUI((s) => s.toggleElementsPanel);
   const imgRef = useRef<HTMLInputElement>(null);
 
-  const placeImage = (file: File) => {
+  const placeImage = async (file: File) => {
     const page = pages.find((p) => p.id === currentPageId);
     if (!page) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = reader.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const { width: vw, height: vh } = visibleSize(page);
-        const aspect = img.width / img.height;
-        let w = Math.min(vw * 0.45, img.width * 0.75);
-        let h = w / aspect;
-        if (h > vh * 0.45) {
-          h = vh * 0.45;
-          w = h * aspect;
-        }
-        const el: ImageElement = {
-          id: uid('el'),
-          type: 'image',
-          x: (vw - w) / 2,
-          y: (vh - h) / 2,
-          width: w,
-          height: h,
-          opacity: 1,
-          z: page.elements.reduce((m, e) => Math.max(m, e.z), 0) + 1,
-          src,
-          aspect,
-        };
-        addElement(page.id, el);
-        setTool('select');
-      };
-      img.src = src;
+    const norm = await loadEmbeddableImage(file);
+    if (!norm) {
+      showToast('Bild konnte nicht geladen werden.', 'error');
+      return;
+    }
+    const { src, width: iw, height: ih } = norm;
+    const { width: vw, height: vh } = visibleSize(page);
+    const aspect = iw / ih;
+    let w = Math.min(vw * 0.45, iw * 0.75);
+    let h = w / aspect;
+    if (h > vh * 0.45) {
+      h = vh * 0.45;
+      w = h * aspect;
+    }
+    const el: ImageElement = {
+      id: uid('el'),
+      type: 'image',
+      x: (vw - w) / 2,
+      y: (vh - h) / 2,
+      width: w,
+      height: h,
+      opacity: 1,
+      z: page.elements.reduce((m, e) => Math.max(m, e.z), 0) + 1,
+      src,
+      aspect,
     };
-    reader.readAsDataURL(file);
+    addElement(page.id, el);
+    setTool('select');
   };
 
   return (
@@ -224,11 +244,11 @@ export function ToolRail() {
       <input
         ref={imgRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif"
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) placeImage(f);
+          if (f) void placeImage(f);
           e.target.value = '';
         }}
       />

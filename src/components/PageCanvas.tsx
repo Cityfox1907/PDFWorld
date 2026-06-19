@@ -14,6 +14,7 @@ import {
   matchCatalogFontKey,
   fontDisplayName,
   BASELINE_RATIO,
+  firstBaselineOffset,
   shapeOutline,
   pointsToSvgPath,
   isStrokeOnlyShape,
@@ -446,13 +447,72 @@ export function PageCanvas() {
     };
   }, [zoomAround]);
 
+  // ── scroll to switch pages ──────────────────────────────────────────────
+  // Scrolling past a page edge moves to the next/previous page. Two feels, chosen by the
+  // TopBar toggle (default page-by-page): 'paged' takes a deliberate push and a cooldown
+  // so one gesture flips exactly one page; 'continuous' flips as soon as you reach the
+  // edge and keeps flowing. When zoomed in, the page still scrolls normally first and
+  // only flips once it can't scroll further. Ctrl/⌘+wheel (zoom) and typing are ignored.
+  useEffect(() => {
+    const area = areaRef.current;
+    if (!area) return;
+    let accum = 0;
+    let lastSwitch = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return; // pinch/⌘-zoom is handled above
+      const dy = e.deltaY;
+      if (!dy) return;
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+
+      const max = area.scrollHeight - area.clientHeight;
+      const atBottom = area.scrollTop >= max - 1.5;
+      const atTop = area.scrollTop <= 1.5;
+      const down = dy > 0;
+      // Plenty of page left to scroll in this direction → let it scroll, don't flip.
+      if ((down && !atBottom) || (!down && !atTop)) {
+        accum = 0;
+        return;
+      }
+      const st = useStore.getState();
+      const list = st.pages;
+      const idx = list.findIndex((p) => p.id === st.currentPageId);
+      const targetIdx = down ? idx + 1 : idx - 1;
+      if (idx < 0 || targetIdx < 0 || targetIdx >= list.length) {
+        accum = 0;
+        return; // no page beyond this edge — leave the native overscroll alone
+      }
+      // Past the edge with a page to go to: take over and (maybe) flip.
+      e.preventDefault();
+      const mode = useUI.getState().scrollMode;
+      const cooldown = mode === 'paged' ? 360 : 90;
+      const threshold = mode === 'paged' ? 48 : 16;
+      const now = performance.now();
+      if (now - lastSwitch < cooldown) return;
+      accum += Math.abs(dy);
+      if (accum < threshold) return;
+      accum = 0;
+      lastSwitch = now;
+      st.setCurrentPage(list[targetIdx].id);
+      // Land at the top (scrolling down) or bottom (scrolling up) of the new page once
+      // its fit-to-window has settled.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          area.scrollTop = down ? 0 : area.scrollHeight;
+        }),
+      );
+    };
+    area.addEventListener('wheel', onWheel, { passive: false });
+    return () => area.removeEventListener('wheel', onWheel);
+  }, []);
+
   // Baselines a selected text box can snap to: scanned lines + other text boxes.
   const getAlignTargets = useCallback(
     (excludeId: string | null): number[] => {
       const ts = [...scanBaselines];
       if (page) {
         for (const el of page.elements) {
-          if (el.type === 'text' && el.id !== excludeId) ts.push(el.y + el.size * BASELINE_RATIO);
+          if (el.type === 'text' && el.id !== excludeId) ts.push(el.y + firstBaselineOffset(el.size, el.lineHeight));
         }
       }
       return ts;
@@ -509,7 +569,7 @@ export function PageCanvas() {
       let guideX: number | null = null;
       const primary = targets.length === 1 ? targets[0] : null;
       if (primary && primary.type === 'text' && !primary.rotation) {
-        const nearY = nearestBaseline(primary.y + dy + primary.size * BASELINE_RATIO, getAlignTargets(selId), ALIGN_TOL / scale);
+        const nearY = nearestBaseline(primary.y + dy + firstBaselineOffset(primary.size, primary.lineHeight), getAlignTargets(selId), ALIGN_TOL / scale);
         if (nearY != null) guideY = nearY;
         const nearX = nearestBaseline(primary.x + dx, getAlignTargetsX(selId), ALIGN_TOL / scale);
         if (nearX != null) guideX = nearX;

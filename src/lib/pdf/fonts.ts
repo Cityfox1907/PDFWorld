@@ -10,6 +10,22 @@ import type { BaseFamily } from './types';
 export const BASELINE_RATIO = 0.8;
 
 /**
+ * Distance (in points) from a text box's top to the baseline of its FIRST line, for an
+ * overlay text element rendered with `lineHeight`. The browser centres each glyph row in
+ * its line-box, so the baseline sits half a line of leading — `size·(lineHeight−1)/2` —
+ * below the line top, plus the font ascent (`size·BASELINE_RATIO`).
+ *
+ * Using this single definition for the on-screen text, the alignment guide/snap target
+ * AND the exported baseline keeps all three pixel-identical — so the horizontal guide
+ * lands exactly on the letters it is aligning (waagrechte Ausrichtung), instead of a
+ * fraction of a line too high. (Scanned PDF lines keep their true baseline, with no
+ * leading, since their glyphs are real PDF content, not a CSS line-box.)
+ */
+export function firstBaselineOffset(size: number, lineHeight: number): number {
+  return size * ((lineHeight - 1) / 2 + BASELINE_RATIO);
+}
+
+/**
  * Map a base family + style to one of the 14 PDF standard fonts.
  * The standard fonts are metric-similar to Arial/Times/Courier and cover the full
  * WinAnsi range (incl. German umlauts, ß and €), so they reproduce the vast majority

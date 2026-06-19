@@ -10,14 +10,11 @@ import {
   BlendMode,
 } from 'pdf-lib';
 import type { AnyElement, TextElement, RectElement, EllipseElement, ShapeElement, CalloutElement, HighlightElement, ImageElement, InkElement, FontFamilyKey } from './types';
-import { standardFontFor, BASELINE_RATIO } from './fonts';
+import { standardFontFor, firstBaselineOffset } from './fonts';
 import { baseFamilyOf, fontFileUrl } from './fontCatalog';
 import { getEmbeddedFont } from './embeddedFonts';
 import { shapeOutline, isStrokeOnlyShape, calloutOutline, calloutTailHeight, CALLOUT_PAD, type Pt } from './shapes';
 import { placeBox, placeRotatedBox, rotateViewPoint, axisAngleDeg, type ToPdfPoint, type BoxPlacement } from './coords';
-
-/** Where the baseline sits below a line's top, as a fraction of the font size. */
-const ASCENT_RATIO = BASELINE_RATIO;
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   let h = (hex || '#000000').replace('#', '').trim();
@@ -484,7 +481,10 @@ export class Baker {
       // export must match the on-screen `overflow:hidden`; text fields auto-grow, so
       // they pass clip=false and nothing is dropped).
       if (o.clip && i * o.size * o.lineHeight + o.size > o.height) break;
-      const baselineY = o.y + i * o.size * o.lineHeight + o.size * ASCENT_RATIO;
+      // Same baseline the editor draws on screen (font ascent + half a line of leading),
+      // so the exported text sits exactly where it was placed — and on the same line as
+      // any neighbour it was aligned to.
+      const baselineY = o.y + i * o.size * o.lineHeight + firstBaselineOffset(o.size, o.lineHeight);
       if (list) {
         num++;
         const marker = list === 'bullet' ? '•' : `${num}.`;

@@ -9,7 +9,7 @@ import {
   pointsToSvgPath,
   isStrokeOnlyShape,
   CALLOUT_PAD,
-  BASELINE_RATIO,
+  firstBaselineOffset,
   type AnyElement,
   type ElementPatch,
   type TextElement,
@@ -132,14 +132,15 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       let guideY: number | null = null;
       let guideX: number | null = null;
       if (single && el.type === 'text' && !el.rotation) {
-        const size = (el as TextElement).size;
+        const t = el as TextElement;
+        const off = firstBaselineOffset(t.size, t.lineHeight);
         const tol = SNAP_TOL / scale;
         const ny = el.y + dy;
         const nx = el.x + dx;
         if (alignBaselines && alignBaselines.length) {
-          const snapY = nearestBaseline(ny + size * BASELINE_RATIO, alignBaselines, tol);
+          const snapY = nearestBaseline(ny + off, alignBaselines, tol);
           if (snapY != null) {
-            dy = snapY - size * BASELINE_RATIO - el.y;
+            dy = snapY - off - el.y;
             guideY = snapY;
           }
         }

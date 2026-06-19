@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useStore } from '../state/store';
 import { useUI } from '../state/ui';
 import { viewportBridge } from '../state/viewport';
-import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2, Moon, Sun } from 'lucide-react';
+import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2, Moon, Sun, GalleryVerticalEnd, ScrollText } from 'lucide-react';
 
 export function TopBar() {
   const fileName = useStore((s) => s.fileName);
@@ -18,7 +18,15 @@ export function TopBar() {
   const reset = useStore((s) => s.reset);
   const theme = useUI((s) => s.theme);
   const toggleTheme = useUI((s) => s.toggleTheme);
+  const scrollMode = useUI((s) => s.scrollMode);
+  const toggleScrollMode = useUI((s) => s.toggleScrollMode);
   const mergeRef = useRef<HTMLInputElement>(null);
+
+  // The PDFWorld mark doubles as a home button: back to the start screen. Confirm first
+  // so an accidental click can't drop unsaved edits.
+  const goHome = () => {
+    if (confirm('Zur Startseite zurück? Nicht gespeicherte Änderungen gehen verloren.')) void reset();
+  };
 
   // Multiplicative steps traverse the wide 25 %–2000 % range in a handful of clicks.
   // Route through the canvas so the magnification stays anchored on the centre of the
@@ -33,9 +41,9 @@ export function TopBar() {
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <span className="brand">
+        <button className="brand" onClick={goHome} title="Zur Startseite (Home)">
           PDF<em>World</em>
-        </span>
+        </button>
         <span className="file-pill" title={fileName}>
           {fileName || 'Dokument'}
         </span>
@@ -64,6 +72,17 @@ export function TopBar() {
       </div>
 
       <div className="topbar-right">
+        <button
+          className="btn ghost icon"
+          onClick={toggleScrollMode}
+          title={
+            scrollMode === 'paged'
+              ? 'Scrollen: Seite für Seite — klicken für fliessenden Wechsel'
+              : 'Scrollen: fliessend — klicken für Seite für Seite'
+          }
+        >
+          {scrollMode === 'paged' ? <GalleryVerticalEnd size={16} /> : <ScrollText size={16} />}
+        </button>
         <button
           className="btn ghost icon"
           onClick={toggleTheme}

@@ -1467,7 +1467,7 @@ export function PageCanvas() {
   const sorted = [...page.elements].sort((a, b) => a.z - b.z);
 
   return (
-    <div className={`canvas-area tool-${activeTool}`} ref={areaRef}>
+    <div className={`canvas-area tool-${activeTool}${zoom > 1 ? ' zoomed' : ''}`} ref={areaRef}>
       <div ref={stageRef} className="canvas-stage" style={{ width: view.width * scale, height: view.height * scale }}>
         {/* Geometry (left/top/width/height) is set imperatively per render so React
             re-renders never clobber the window placement; see paintViewport. */}

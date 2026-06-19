@@ -120,6 +120,14 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     if (!members.length) return;
     const single = members.length === 1;
 
+    // Capture the pointer to THIS element so every following move/up is delivered here
+    // even if the finger slides off the element — without this, touch drags on iOS get
+    // "stuck" the moment the touch is reinterpreted as a scroll and the element stops
+    // following the finger. The matching `releasePointerCapture` runs in `up`.
+    const node = e.currentTarget as HTMLElement;
+    const pointerId = e.pointerId;
+    node.setPointerCapture?.(pointerId);
+
     const startX = e.clientX;
     const startY = e.clientY;
     let moved = false;
@@ -163,6 +171,8 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      node.releasePointerCapture?.(pointerId);
       onAlignGuide?.(null);
       onAlignGuideX?.(null);
       if (moved) commit();
@@ -172,6 +182,9 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    // A cancelled touch (browser stole the gesture, multi-touch, …) must tear the drag
+    // down too, otherwise the listeners leak and the next tap behaves erratically.
+    window.addEventListener('pointercancel', up);
   };
 
   const startResize = (e: React.PointerEvent, h: Handle) => {
@@ -179,6 +192,9 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     e.preventDefault();
     if (locked) return;
     selectElement(el.id);
+    const node = e.currentTarget as HTMLElement;
+    const pointerId = e.pointerId;
+    node.setPointerCapture?.(pointerId);
     const startX = e.clientX;
     const startY = e.clientY;
     const o = { x: el.x, y: el.y, w: el.width, h: el.height };
@@ -206,10 +222,13 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      node.releasePointerCapture?.(pointerId);
       commit();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   };
 
   // Hidden elements (toggled off in the Elements panel) leave the canvas entirely and

@@ -41,7 +41,14 @@ die bestehenden Seiten eingezeichnet.
   Klick auf die Seite** setzt dort ein leeres Textfeld in **exakt dieser Schrift**
   (gleiche Grösse, gleicher Stil mit **Fett/Kursiv**, gleiche Farbe), **ohne
   Hintergrund-Abdeckung**, sodass das Original darunter unangetastet bleibt. So
-  wählst du frei, **wohin** der Text kommt, statt ihn fest auf die Zeile zu setzen
+  wählst du frei, **wohin** der Text kommt, statt ihn fest auf die Zeile zu setzen.
+  Das übernommene Original wird dabei **glyphengetreu** dargestellt – ohne
+  künstliches Schräg-/Fettstellen über eine bereits kursive/fette Originaldatei –,
+  und das **Schrift-Feld rechts zeigt denselben echten Schriftnamen** wie das
+  ausgewählte Textfeld: angezeigte Schrift, Text auf der Seite und Export sind
+  **immer deckungsgleich**. Die Metrik-Familie (Serif/Sans/Mono) wird aus dem
+  **echten Schriftnamen** abgeleitet, nicht aus dem generischen Notnamen von pdf.js –
+  so wird z. B. eine eingebettete **DejaVu-Serif**-Zeile nie als Helvetica geführt
 - **Mehrfachauswahl** – mit dem Auswählen-Werkzeug einen **Rahmen aufziehen**, um
   mehrere Elemente auf einmal zu markieren (Shift-Klick fügt einzelne hinzu/entfernt
   sie); danach lassen sie sich **gemeinsam verschieben**, duplizieren oder löschen

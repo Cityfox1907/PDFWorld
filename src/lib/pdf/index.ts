@@ -28,12 +28,14 @@ export {
   fontDef,
   baseFamilyOf,
   cssStackFor,
+  textFaceCss,
   fontFileUrl,
   matchCatalogFontKey,
+  resolveFamilyKey,
   fontDisplayName,
   injectFontFaces,
 } from './fontCatalog';
-export type { FontDef } from './fontCatalog';
+export type { FontDef, TextFaceCss } from './fontCatalog';
 export { registerEmbeddedFont, embeddedFontFamily, getEmbeddedFont } from './embeddedFonts';
 export type { EmbeddedFont } from './embeddedFonts';
 export { shapeOutline, calloutOutline, calloutTailHeight, pointsToSvgPath, isStrokeOnlyShape, CALLOUT_PAD } from './shapes';

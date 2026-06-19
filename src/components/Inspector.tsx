@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStore, type ToolId, type ToolDefaults } from '../state/store';
 import type { AnyElement, ElementPatch, TextElement, ShapeElement, CalloutElement, ImageElement, InkElement, ShapeKind } from '../lib/pdf';
-import { isStrokeOnlyShape } from '../lib/pdf';
+import { isStrokeOnlyShape, embeddedFontFamily } from '../lib/pdf';
 import { uid } from '../lib/utils/id';
 import { inkDashArray } from '../lib/utils/ink';
 import { FontPicker } from './FontPicker';
@@ -535,19 +535,26 @@ function ToolSettings({
 }
 
 function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => void }) {
-  // Picking a font or toggling weight/style is an explicit override, so drop the
-  // captured original-font binding and let the chosen family/style take effect.
+  // When this field carries a captured ORIGINAL typeface (scan editor), the font control
+  // shows that real font — its true name and a preview in the actual face — instead of
+  // the metric fallback family, so the inspector and the text on the page always agree.
+  // Picking a font, or toggling weight/style, is an explicit override: it drops the
+  // original-font binding and lets the chosen family/style take effect.
+  const originalCss = el.embeddedFontId ? embeddedFontFamily(el.embeddedFontId) : undefined;
+  const showsOriginal = !!el.embeddedFontId && !!el.fontLabel;
   return (
     <Group title="Schrift">
-      {el.embeddedFontId && el.fontLabel && (
-        <p className="insp-note" style={{ marginTop: 0 }}>
-          ✓ Originalschrift: <strong>{el.fontLabel}</strong> (1:1)
-        </p>
+      {el.embeddedFontId && (
+        <p className="insp-note" style={{ marginTop: 0 }}>✓ Originalschrift – exakt 1:1 übernommen</p>
       )}
       <Row>
-        <FontPicker value={el.family} onChange={(family) => set({ family, embeddedFontId: undefined, fontLabel: undefined })} />
+        <FontPicker
+          value={el.family}
+          onChange={(family) => set({ family, embeddedFontId: undefined, fontLabel: undefined })}
+          displayLabel={showsOriginal ? el.fontLabel : undefined}
+          previewCss={showsOriginal ? originalCss : undefined}
+        />
       </Row>
-      {el.embeddedFontId && !el.fontLabel && <p className="insp-note">✓ Originalschrift des Dokuments (1:1)</p>}
       <Row>
         <input
           className="field field-sm"

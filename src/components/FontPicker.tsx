@@ -24,13 +24,35 @@ interface PopPos {
   maxHeight: number;
 }
 
-export function FontPicker({ value, onChange }: { value: FontFamilyKey; onChange: (key: FontFamilyKey) => void }) {
+export function FontPicker({
+  value,
+  onChange,
+  displayLabel,
+  previewCss,
+}: {
+  value: FontFamilyKey;
+  onChange: (key: FontFamilyKey) => void;
+  /**
+   * Overrides the trigger's name + preview. Set when the element carries a captured
+   * ORIGINAL typeface (scan editor) that isn't a catalogue entry, so the control shows
+   * the *real* font in use ("Deja Vu Serif Italic") instead of the metric fallback —
+   * keeping the inspector and the text on the page in perfect agreement. Picking any
+   * catalogue font from the list clears the override via onChange.
+   */
+  displayLabel?: string;
+  previewCss?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [pos, setPos] = useState<PopPos | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const current = fontDef(value);
+  const triggerLabel = displayLabel ?? current.label;
+  const triggerCss = previewCss ?? cssStackFor(value);
+  // While an original face is shown, no catalogue row is the "active" one (the real
+  // font isn't in the list), so we don't tick a row that isn't what's actually used.
+  const overriding = displayLabel != null;
 
   // The popover is position:fixed (computed from the trigger) so the inspector's
   // own scroll/overflow can never clip it, and it can flip above when low on space.
@@ -97,11 +119,11 @@ export function FontPicker({ value, onChange }: { value: FontFamilyKey; onChange
         ref={triggerRef}
         type="button"
         className="field font-picker-btn"
-        style={{ fontFamily: cssStackFor(value) }}
+        style={{ fontFamily: triggerCss }}
         onClick={() => setOpen((o) => !o)}
-        title={current.label}
+        title={triggerLabel}
       >
-        <span className="font-picker-name">{current.label}</span>
+        <span className="font-picker-name">{triggerLabel}</span>
         <ChevronDown size={15} className="font-picker-chevron" />
       </button>
 
@@ -123,18 +145,21 @@ export function FontPicker({ value, onChange }: { value: FontFamilyKey; onChange
             {groups.map(({ group, fonts }) => (
               <div key={group}>
                 <div className="font-picker-group">{GROUP_LABEL[group]}</div>
-                {fonts.map((f) => (
-                  <button
-                    key={f.key}
-                    type="button"
-                    className={`font-picker-item ${f.key === value ? 'active' : ''}`}
-                    style={{ fontFamily: cssStackFor(f.key) }}
-                    onClick={() => select(f.key)}
-                  >
-                    <span className="font-picker-item-name">{f.label}</span>
-                    {f.key === value && <Check size={14} />}
-                  </button>
-                ))}
+                {fonts.map((f) => {
+                  const active = !overriding && f.key === value;
+                  return (
+                    <button
+                      key={f.key}
+                      type="button"
+                      className={`font-picker-item ${active ? 'active' : ''}`}
+                      style={{ fontFamily: cssStackFor(f.key) }}
+                      onClick={() => select(f.key)}
+                    >
+                      <span className="font-picker-item-name">{f.label}</span>
+                      {active && <Check size={14} />}
+                    </button>
+                  );
+                })}
               </div>
             ))}
             {groups.length === 0 && <div className="font-picker-empty">Keine Treffer</div>}

@@ -1,5 +1,6 @@
-import type { BaseFamily } from './types';
-import { compactFontName, prettyFontName, isGenericFontLabel, isInternalFontName } from './fonts';
+import type { BaseFamily, FontFamilyKey } from './types';
+import { compactFontName, prettyFontName, isGenericFontLabel, isInternalFontName, classifyFont } from './fonts';
+import { embeddedFontFamily } from './embeddedFonts';
 
 /**
  * Curated catalogue of the ~90 most-used document fonts.
@@ -397,6 +398,23 @@ export function matchCatalogFontKey(rawName: string | undefined | null): string 
 }
 
 /**
+ * Resolve a raw PDF/CSS font name to the catalogue key (or metric family) the editor
+ * should STORE on an element and render for it — the same identity the inspector then
+ * shows. It prefers an exact catalogue match (Arial, Roboto, Times New Roman …, which we
+ * reproduce 1:1) and otherwise classifies the *real* name into its metric family
+ * (serif / sans / mono).
+ *
+ * Feed it the font's real /BaseFont name, NOT pdf.js's per-run style family: pdf.js only
+ * ever reports a generic "serif"/"sans-serif"/"monospace" there (from descriptor flags),
+ * so a flag-less or non-embedded serif like DejaVu Serif would otherwise be filed — and
+ * shown, and fall back on export — as a sans (Helvetica). This single rule keeps the
+ * stored family, the inspector's font control and the export fallback all in agreement.
+ */
+export function resolveFamilyKey(rawName: string | undefined | null): FontFamilyKey {
+  return matchCatalogFontKey(rawName) ?? classifyFont(rawName).family;
+}
+
+/**
  * Resolve the *display name* for a scanned line's font — the single source of truth
  * the font panel and inspector show. The rule keeps the shown name honest, so the
  * preview and the text actually written never disagree:
@@ -427,6 +445,49 @@ export function cssStackFor(key: string): string {
   if (f.css) return f.css;
   const sys = sysStack(f.base);
   return f.web ? `"${f.label}", ${sys}` : sys;
+}
+
+/** The on-screen CSS face (family + weight + style) for a styled text element. */
+export interface TextFaceCss {
+  fontFamily: string;
+  fontWeight: 400 | 700;
+  fontStyle: 'normal' | 'italic';
+}
+
+/**
+ * THE single rule for how the editor paints a text element on screen — used by the
+ * field, its in-place editor, the scan line-boxes, the scan preview AND the inspector's
+ * font control, so what you see can never disagree between them.
+ *
+ * Two cases that must stay distinct:
+ *   • An embedded ORIGINAL face was captured for this element (scan editor, 1:1 reuse):
+ *     the captured font program ALREADY encodes the exact weight and slant of the source
+ *     glyphs. We therefore render it verbatim and force weight/style to normal. Asking
+ *     the browser for bold/italic on top would make it FAUX-synthesise a *second* slant
+ *     (or extra weight) over an already-italic/already-bold face — the over-slanted look
+ *     that made adopted text differ from its original (and from the export, which never
+ *     synthesises). Forcing normal keeps screen and export pixel-identical.
+ *   • A catalogue/standard family: render that family and let the browser apply the
+ *     requested bold/italic (a real shipped face when available, else a faithful
+ *     synthetic) — exactly the normal text-field behaviour.
+ *
+ * When an embedded id is present but its program isn't available this session (e.g. a
+ * reloaded document), we fall back to the metric family — the same fallback the export
+ * uses — so the two still match.
+ */
+export function textFaceCss(
+  family: string,
+  embeddedFontId: string | undefined,
+  bold: boolean,
+  italic: boolean,
+): TextFaceCss {
+  const embedded = embeddedFontFamily(embeddedFontId);
+  if (embedded) return { fontFamily: embedded, fontWeight: 400, fontStyle: 'normal' };
+  return {
+    fontFamily: cssStackFor(family),
+    fontWeight: bold ? 700 : 400,
+    fontStyle: italic ? 'italic' : 'normal',
+  };
 }
 
 const CDN = 'https://cdn.jsdelivr.net/npm/@fontsource';

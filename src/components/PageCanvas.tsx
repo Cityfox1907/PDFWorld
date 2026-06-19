@@ -91,6 +91,10 @@ export function PageCanvas() {
   const regionRef = useRef<{ vx: number; vy: number; vw: number; vh: number; renderScale: number; dpr: number } | null>(null);
   // Monotonic id so a slower render can detect it was superseded and bail.
   const renderTokenRef = useRef(0);
+  // Page-turn transition: the last painted page id (to detect a real page change) and
+  // the pending slide direction (+1 next, −1 previous) the next paint should animate in.
+  const lastPageIdRef = useRef<string | null>(null);
+  const enterAnimRef = useRef<-1 | 0 | 1>(0);
   const [fitScale, setFitScale] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AnyElement | null>(null);
@@ -192,6 +196,15 @@ export function PageCanvas() {
       canvas.style.width = `${region.vw * scale}px`;
       canvas.style.height = `${region.vh * scale}px`;
     };
+    // Play the gentle slide/fade once the freshly-painted page is on screen (set by the
+    // render effect on a real page change), so the swap reads as a smooth page turn.
+    const maybeAnimateEnter = () => {
+      const dir = enterAnimRef.current;
+      if (dir) {
+        enterAnimRef.current = 0;
+        animatePageEnter(stageRef.current, dir);
+      }
+    };
 
     if (page.blank) {
       const ctx = canvas.getContext('2d', { alpha: false });
@@ -203,6 +216,7 @@ export function PageCanvas() {
       }
       place();
       regionRef.current = region;
+      maybeAnimateEnter();
       return;
     }
 
@@ -222,14 +236,17 @@ export function PageCanvas() {
       ctx.drawImage(off, 0, 0);
       place();
       regionRef.current = region;
+      maybeAnimateEnter();
     } catch {
       /* superseded by a newer render */
     }
   }, [engine, page, scale, rotation, view.width, view.height]);
 
-  // Drive the window render: immediate on a page / rotation / size change (clearing
-  // the stale page first so it can't flash), debounced on a pure zoom so the stretched
-  // preview leads and the crisp re-render lands once the gesture settles.
+  // Drive the window render: immediate on a page / rotation / size change, debounced on a
+  // pure zoom so the stretched preview leads and the crisp re-render lands once the
+  // gesture settles. We deliberately do NOT clear the canvas to white first — paintViewport
+  // resizes and blits the new bitmap in one synchronous step, so holding the previous frame
+  // until the new one is ready makes the page swap flash-free (no white flicker).
   const renderSigRef = useRef('');
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -237,14 +254,16 @@ export function PageCanvas() {
     const sig = `${page.id}|${rotation}|${Math.round(view.width)}x${Math.round(view.height)}`;
     const onlyZoom = renderSigRef.current === sig;
     renderSigRef.current = sig;
-    if (!onlyZoom) {
-      regionRef.current = null; // the old bitmap belongs to the previous page/layout
-      const ctx = canvas.getContext('2d', { alpha: false });
-      if (ctx) {
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
+    // On a true page change, queue a directional slide-in for the next paint and drop the
+    // old region (it belonged to the previous page). The direction follows the page order.
+    if (lastPageIdRef.current !== null && lastPageIdRef.current !== page.id) {
+      const list = useStore.getState().pages;
+      const oldIdx = list.findIndex((p) => p.id === lastPageIdRef.current);
+      const newIdx = list.findIndex((p) => p.id === page.id);
+      enterAnimRef.current = oldIdx >= 0 && newIdx >= 0 && newIdx < oldIdx ? -1 : 1;
     }
+    lastPageIdRef.current = page.id;
+    if (!onlyZoom) regionRef.current = null;
     const t = window.setTimeout(() => void paintViewport(), onlyZoom ? 120 : 0);
     return () => window.clearTimeout(t);
   }, [paintViewport, page, rotation, view.width, view.height]);
@@ -447,29 +466,46 @@ export function PageCanvas() {
     };
   }, [zoomAround]);
 
-  // ── scroll to switch pages ──────────────────────────────────────────────
-  // Scrolling past a page edge moves to the next/previous page. Two feels, chosen by the
-  // TopBar toggle (default page-by-page): 'paged' takes a deliberate push and a cooldown
-  // so one gesture flips exactly one page; 'continuous' flips as soon as you reach the
-  // edge and keeps flowing. When zoomed in, the page still scrolls normally first and
-  // only flips once it can't scroll further. Ctrl/⌘+wheel (zoom) and typing are ignored.
+  // ── scroll to switch pages (exactly one page per gesture) ────────────────
+  // At a page edge a deliberate scroll turns to the next/previous page. Crucially it
+  // flips ONE page per gesture: the moment a flick turns a page it "latches", and the
+  // rest of that flick's momentum is ignored until the wheel falls quiet (a clear pause).
+  // So a light scroll never skips two or three pages — it always moves exactly one. When
+  // zoomed in, the page scrolls normally first and only turns at the very edge.
+  // Ctrl/⌘+wheel (zoom) and typing are left untouched.
   useEffect(() => {
     const area = areaRef.current;
     if (!area) return;
+    // A new gesture begins after the wheel has been quiet for QUIET ms; a turn needs a
+    // deliberate NEED px of travel (~one wheel notch) so a stray nudge doesn't flip, yet a
+    // single light scroll turns exactly one page.
+    const QUIET = 180;
+    const NEED = 40;
     let accum = 0;
-    let lastSwitch = 0;
+    let armed = true;
+    let lastTs = 0;
     const onWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) return; // pinch/⌘-zoom is handled above
-      const dy = e.deltaY;
+      if (e.ctrlKey || e.metaKey) return; // pinch/⌘-zoom handled above
+      let dy = e.deltaY;
       if (!dy) return;
+      // Normalise line / page wheel units to pixels so mice and trackpads feel the same.
+      if (e.deltaMode === 1) dy *= 16;
+      else if (e.deltaMode === 2) dy *= area.clientHeight;
       const ae = document.activeElement as HTMLElement | null;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
 
+      const now = performance.now();
+      if (now - lastTs > QUIET) {
+        armed = true; // the previous gesture ended — ready to turn again
+        accum = 0;
+      }
+      lastTs = now;
+
       const max = area.scrollHeight - area.clientHeight;
+      const down = dy > 0;
       const atBottom = area.scrollTop >= max - 1.5;
       const atTop = area.scrollTop <= 1.5;
-      const down = dy > 0;
-      // Plenty of page left to scroll in this direction → let it scroll, don't flip.
+      // Room left to scroll within the page → let the browser scroll normally.
       if ((down && !atBottom) || (!down && !atTop)) {
         accum = 0;
         return;
@@ -478,24 +514,17 @@ export function PageCanvas() {
       const list = st.pages;
       const idx = list.findIndex((p) => p.id === st.currentPageId);
       const targetIdx = down ? idx + 1 : idx - 1;
-      if (idx < 0 || targetIdx < 0 || targetIdx >= list.length) {
-        accum = 0;
-        return; // no page beyond this edge — leave the native overscroll alone
-      }
-      // Past the edge with a page to go to: take over and (maybe) flip.
+      if (idx < 0 || targetIdx < 0 || targetIdx >= list.length) return; // no page past this edge
+
+      // Pressing against the edge with somewhere to go: take over the wheel.
       e.preventDefault();
-      const mode = useUI.getState().scrollMode;
-      const cooldown = mode === 'paged' ? 360 : 90;
-      const threshold = mode === 'paged' ? 48 : 16;
-      const now = performance.now();
-      if (now - lastSwitch < cooldown) return;
+      if (!armed) return; // already turned this gesture — swallow the leftover momentum
       accum += Math.abs(dy);
-      if (accum < threshold) return;
+      if (accum < NEED) return; // wait for a deliberate amount of scroll
+      armed = false; // latch until the wheel goes quiet, so exactly one page turns
       accum = 0;
-      lastSwitch = now;
       st.setCurrentPage(list[targetIdx].id);
-      // Land at the top (scrolling down) or bottom (scrolling up) of the new page once
-      // its fit-to-window has settled.
+      // Land at the top (down) / bottom (up) of the new page once its fit has settled.
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
           area.scrollTop = down ? 0 : area.scrollHeight;
@@ -1498,6 +1527,25 @@ export function PageCanvas() {
 
 function nextZ(page: EditorPage): number {
   return page.elements.reduce((m, e) => Math.max(m, e.z), 0) + 1;
+}
+
+/**
+ * Smooth page-turn: a quick, subtle slide + fade of the whole stage (canvas + overlay)
+ * so switching pages feels fluid instead of a hard cut. `dir` is +1 for the next page
+ * (slides up from just below) and −1 for the previous one (slides down from above). Uses
+ * the Web Animations API, so it leaves no lingering inline transform when it finishes.
+ */
+function animatePageEnter(stage: HTMLElement | null, dir: number): void {
+  if (!stage || typeof stage.animate !== 'function') return;
+  // Drop any in-flight turn so rapid paging doesn't stack animations.
+  stage.getAnimations?.().forEach((a) => a.cancel());
+  stage.animate(
+    [
+      { opacity: 0.5, transform: `translateY(${dir * 12}px)` },
+      { opacity: 1, transform: 'translateY(0)' },
+    ],
+    { duration: 200, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' },
+  );
 }
 
 /** Axis-aligned overlap test between the marquee and an element's box (view-points). */

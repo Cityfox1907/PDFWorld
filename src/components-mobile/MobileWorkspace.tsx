@@ -48,6 +48,46 @@ export function MobileWorkspace() {
     return () => setZoomLimits(MIN_ZOOM, MAX_ZOOM);
   }, [setZoomLimits]);
 
+  // Pin the whole app to the viewport so the page itself can NEVER scroll or rubber-band:
+  // the toolbar, dock and document frame stay rock-steady, and only the explicitly
+  // scrollable areas inside (a zoomed canvas, the bottom sheets, the tool dock) move.
+  // Without this, iOS Safari scrolls the entire body — most visibly when a text field is
+  // focused and the browser yanks the page up to reveal it, leaving the app drifting.
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      overflow: body.style.overflow,
+      position: body.style.position,
+      width: body.style.width,
+      height: body.style.height,
+      top: body.style.top,
+      left: body.style.left,
+      overscroll: body.style.overscrollBehavior,
+    };
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    body.style.position = 'fixed';
+    body.style.width = '100%';
+    body.style.height = '100%';
+    body.style.top = '0';
+    body.style.left = '0';
+    body.style.overscrollBehavior = 'none';
+    body.classList.add('m-locked');
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.overflow;
+      body.style.position = prev.position;
+      body.style.width = prev.width;
+      body.style.height = prev.height;
+      body.style.top = prev.top;
+      body.style.left = prev.left;
+      body.style.overscrollBehavior = prev.overscroll;
+      body.classList.remove('m-locked');
+    };
+  }, []);
+
   // Kill the browser's OWN pinch / double-tap / gesture zoom so only the document
   // magnifies (via the canvas's JS pinch), never the toolbar or tabs. iOS Safari fires
   // gesture* events for native zoom; suppressing them — plus any 2-finger move that the

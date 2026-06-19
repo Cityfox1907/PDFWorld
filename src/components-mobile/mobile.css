@@ -6,9 +6,20 @@
    tokens (global.css) for a consistent, Apple-grade feel.
    ============================================================ */
 
+/* The body is pinned (position:fixed) while the mobile shell is mounted — see
+   MobileWorkspace — so the page can never scroll. Belt-and-braces here too. */
+html:has(.m-app),
+body.m-locked {
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
 .m-app {
   display: flex;
   flex-direction: column;
+  position: fixed;
+  inset: 0;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -118,6 +129,42 @@
 }
 .m-app .canvas-stage {
   margin: 18px auto;
+}
+
+/* ── TWO-TAP SELECTION (touch) ──
+   On a phone a drag-marquee fights the browser's pan/scroll, so selection is done by
+   tapping two opposite corners. This is the marker dropped on the first corner — a clear,
+   pulsing target so it's obvious the next tap closes the rectangle. */
+.m-app .tap-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 999px;
+  border: 2px solid var(--accent);
+  background: var(--accent-tint);
+  box-shadow: 0 0 0 4px var(--accent-ring);
+  pointer-events: none;
+  z-index: 11;
+  animation: m-tapcorner 1s var(--ease) infinite;
+}
+.m-app .tap-corner::after {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+@keyframes m-tapcorner {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.7;
+  }
 }
 /* Dragging an element (or a resize handle) must move it, not scroll the page. */
 .m-app .el,

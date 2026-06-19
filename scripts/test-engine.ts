@@ -9,7 +9,7 @@
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { makeToPdfPoint, placeBox, placeRotatedBox } from '../src/lib/pdf/coords.ts';
 import { exportInPlace, exportRebuild, isIdentityArrangement, BLANK_SOURCE, type ExportPageSpec } from '../src/lib/pdf/pages.ts';
-import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf, matchCatalogFontKey } from '../src/lib/pdf/fontCatalog.ts';
+import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf, matchCatalogFontKey, resolveFamilyKey, textFaceCss } from '../src/lib/pdf/fontCatalog.ts';
 import { classifyFont, prettyFontName, firstBaselineOffset } from '../src/lib/pdf/fonts.ts';
 import { shapeOutline, isStrokeOnlyShape } from '../src/lib/pdf/shapes.ts';
 import { registerEmbeddedFont, getEmbeddedFont, embeddedFontFamily } from '../src/lib/pdf/embeddedFonts.ts';
@@ -165,6 +165,33 @@ async function run(): Promise<void> {
     // Friendly labels keep a generic family readable instead of "sans serif".
     ok('prettyFontName maps generic sans-serif → Sans-Serif', prettyFontName('sans-serif') === 'Sans-Serif');
     ok('prettyFontName strips subset prefix', prettyFontName('ABCDEE+Arial') === 'Arial');
+
+    // The exact regression from the screenshots: a serif face the PDF embeds, but whose
+    // per-run style pdf.js reports only as a generic "sans-serif" (its descriptor lacks
+    // the Serif flag). The stored family must follow the REAL /BaseFont name (serif) —
+    // not the generic — or the inspector shows "Sans (Helvetica)" for an italic serif
+    // line and, if the original can't embed, the export falls back to Helvetica too.
+    ok('DejaVu Serif Italic classifies as serif (not sans)', classifyFont('DejaVuSerif-Italic').family === 'serif');
+    ok('DejaVu Serif Italic keeps its italic', classifyFont('DejaVuSerif-Italic').italic === true);
+    ok('DejaVu Sans classifies as sans', classifyFont('DejaVuSans').family === 'sans');
+    ok('DejaVu Sans Mono classifies as mono (not sans)', classifyFont('DejaVuSansMono').family === 'mono');
+    ok('resolveFamilyKey(subset DejaVuSerif-Italic) → serif', resolveFamilyKey('ABCDEF+DejaVuSerif-Italic') === 'serif');
+    ok('resolved DejaVu Serif key carries the serif metric family', baseFamilyOf(resolveFamilyKey('DejaVuSerif')) === 'serif');
+    ok('resolveFamilyKey keeps an exact catalogue match 1:1', resolveFamilyKey('TimesNewRomanPS-BoldMT') === 'times-new-roman');
+    ok('resolveFamilyKey(NimbusRomanNo9L) → Times New Roman', resolveFamilyKey('NimbusRomanNo9L-Regular') === 'times-new-roman');
+    ok('resolveFamilyKey(LiberationSerif) → Times New Roman', resolveFamilyKey('LiberationSerif-Italic') === 'times-new-roman');
+
+    // textFaceCss — the single on-screen face rule. Without a captured original it
+    // reflects the chosen family plus the requested weight/style…
+    const plain = textFaceCss('serif', undefined, true, true);
+    ok('textFaceCss bold+italic → 700 / italic on the family stack', plain.fontWeight === 700 && plain.fontStyle === 'italic' && /times|serif/i.test(plain.fontFamily));
+    const reg = textFaceCss('arial', undefined, false, false);
+    ok('textFaceCss regular → 400 / normal', reg.fontWeight === 400 && reg.fontStyle === 'normal' && /arial/i.test(reg.fontFamily));
+    // …and when an embedded id can't resolve to a real face (e.g. a reloaded document, or
+    // here: no DOM) it falls back to the SAME metric family the export uses, so screen and
+    // export still agree on a serif rather than silently drifting to Helvetica.
+    const fb = textFaceCss('serif', 'src#0#f7', true, true);
+    ok('textFaceCss falls back to the metric family when the original face is unavailable', /times|serif/i.test(fb.fontFamily));
   }
 
   // ── in-place export preserves original text + adds overlay ──

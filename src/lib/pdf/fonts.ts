@@ -97,11 +97,12 @@ const GENERIC_LABEL: Record<string, string> = {
   mono: 'Monospace',
 };
 
-// Substring hints, checked AFTER the exact generic map. Sans is deliberately
-// tested before serif so any "…sans…" name wins over the "serif" hidden inside it.
-const MONO_HINTS = ['courier', 'consol', 'menlo', 'monaco', 'inconsolata', 'sourcecodepro', 'liberationmono', 'robotomono', 'jetbrainsmono', 'firacode', 'spacemono', 'ibmplexmono', 'ubuntumono', 'monospace'];
-const SANS_HINTS = ['sans', 'arial', 'helvetic', 'verdana', 'tahoma', 'segoe', 'calibri', 'candara', 'corbel', 'trebuchet', 'frutiger', 'myriad', 'gill', 'futura', 'avenir', 'gotham', 'proxima', 'dejavusans', 'liberationsans', 'opensans', 'notosans', 'sourcesans', 'firasans', 'worksans', 'ptsans'];
-const SERIF_HINTS = ['times', 'georgia', 'garamond', 'minion', 'roman', 'serif', 'cambria', 'palatino', 'merriweather', 'baskerville', 'caslon', 'didot', 'bodoni', 'slab', 'playfair', 'lora', 'spectral', 'cormorant', 'bookman', 'liberationserif'];
+// Substring hints, checked AFTER the exact generic map. Mono is tested first (a
+// "…SansMono" name is monospace, not sans), then sans before serif so any "…sans…"
+// name wins over the "serif" hidden inside it.
+const MONO_HINTS = ['courier', 'consol', 'menlo', 'monaco', 'inconsolata', 'sourcecodepro', 'liberationmono', 'robotomono', 'jetbrainsmono', 'firacode', 'spacemono', 'ibmplexmono', 'ubuntumono', 'dejavusansmono', 'dejavumono', 'nimbusmono', 'cousine', 'monospace'];
+const SANS_HINTS = ['sans', 'arial', 'helvetic', 'verdana', 'tahoma', 'segoe', 'calibri', 'candara', 'corbel', 'trebuchet', 'frutiger', 'myriad', 'gill', 'futura', 'avenir', 'gotham', 'proxima', 'dejavusans', 'liberationsans', 'nimbussans', 'opensans', 'notosans', 'sourcesans', 'firasans', 'worksans', 'ptsans', 'grotesk', 'grotesque', 'franklin', 'univers', 'akzidenz'];
+const SERIF_HINTS = ['times', 'georgia', 'garamond', 'minion', 'roman', 'serif', 'cambria', 'palatino', 'merriweather', 'baskerville', 'caslon', 'didot', 'bodoni', 'slab', 'playfair', 'lora', 'spectral', 'cormorant', 'bookman', 'liberationserif', 'nimbusroman', 'charter', 'utopia', 'schoolbook', 'tinos', 'plantin', 'sabon', 'goudy'];
 
 /** Decide the metric family for an already-compacted font name. */
 function familyForCompact(compact: string): BaseFamily {

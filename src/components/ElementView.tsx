@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
 import {
   cssStackFor,
-  embeddedFontFamily,
+  textFaceCss,
   shapeOutline,
   calloutOutline,
   calloutTailHeight,
@@ -300,11 +300,11 @@ function ElementBody({
     case 'text': {
       const t = el as TextElement;
       const textStyle: React.CSSProperties = {
-        // Prefer the captured original typeface so an in-place edit looks identical.
-        fontFamily: embeddedFontFamily(t.embeddedFontId) ?? cssStackFor(t.family),
+        // One face rule for field, editor and markers: the captured original typeface
+        // verbatim (no faux bold/italic over an already-styled program), else the chosen
+        // family with the requested weight/style. See textFaceCss.
+        ...textFaceCss(t.family, t.embeddedFontId, t.bold, t.italic),
         fontSize: t.size * scale,
-        fontWeight: t.bold ? 700 : 400,
-        fontStyle: t.italic ? 'italic' : 'normal',
         color: t.color,
         textAlign: t.align,
         lineHeight: t.lineHeight,

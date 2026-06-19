@@ -8,10 +8,10 @@ import {
   inspectFonts,
   groupRunsIntoLines,
   registerEmbeddedFont,
-  embeddedFontFamily,
-  cssStackFor,
+  textFaceCss,
   classifyFont,
-  matchCatalogFontKey,
+  resolveFamilyKey,
+  isInternalFontName,
   fontDisplayName,
   BASELINE_RATIO,
   firstBaselineOffset,
@@ -354,13 +354,21 @@ export function PageCanvas() {
           // original's real name, a generic family, or "Unbekannt".
           const rawForName = info?.rawName ?? l.fontName;
           const fontLabel = fontDisplayName(rawForName, embedded);
-          const family = matchCatalogFontKey(rawForName) ?? l.family;
-          // Re-derive weight/style from the font's REAL /BaseFont name, which is
-          // authoritative. pdf.js often reports only a generic "sans-serif" style
-          // for a non-embedded face — so a "Helvetica-Bold" line would lose its bold
-          // flag and be adopted as regular. Classifying the real name fixes that;
-          // we OR with the run's own flags so an already-detected style is never lost.
+          // Family, weight AND style all come from the font's REAL /BaseFont name
+          // (info.rawName), which is authoritative. pdf.js only ever reports a *generic*
+          // fallback family for a run's style — "serif"/"sans-serif"/"monospace", derived
+          // from descriptor flags — never the real name. So a flag-less or non-embedded
+          // serif face like DejaVu Serif comes back as "sans-serif" and, classified from
+          // that, would be filed (and shown, and fall back) as Helvetica. resolveFamilyKey
+          // re-derives the honest family from the real name (catalogue match first, so a
+          // known font like Arial/Roboto/Times still maps 1:1). Only a real, informative
+          // name earns this: an internal pdf.js placeholder ("g_d0_f1") or a missing
+          // inspection leaves the run's own family untouched, so we never *downgrade* a
+          // good guess to a blind "sans". Style flags are OR-ed so an already-detected
+          // bold/italic is never lost.
           const realStyle = info ? classifyFont(info.rawName) : null;
+          const hasRealName = !!info && !isInternalFontName(rawForName);
+          const family = hasRealName ? resolveFamilyKey(rawForName) : l.family;
           const bold = realStyle ? l.bold || realStyle.bold : l.bold;
           const italic = realStyle ? l.italic || realStyle.italic : l.italic;
           return { ...l, family, bold, italic, fontLabel, embedded, embeddedFontId };
@@ -1624,10 +1632,8 @@ function RunBox({ run, scale, active, onPick }: { run: TextRun; scale: number; a
     top: run.y * scale,
     width: Math.max(run.width, 24) * scale,
     height: run.height * scale,
-    fontFamily: embeddedFontFamily(run.embeddedFontId) ?? cssStackFor(run.family),
+    ...textFaceCss(run.family, run.embeddedFontId, run.bold, run.italic),
     fontSize: run.fontSize * scale,
-    fontWeight: run.bold ? 700 : 400,
-    fontStyle: run.italic ? 'italic' : 'normal',
   };
   return (
     <div
@@ -1671,7 +1677,7 @@ function FontInfoPanel({
   onUseColor: (color: string) => void;
   onClose: () => void;
 }) {
-  const previewFamily = embeddedFontFamily(run.embeddedFontId) ?? cssStackFor(run.family);
+  const face = textFaceCss(run.family, run.embeddedFontId, run.bold, run.italic);
   const width = 268;
   const left = Math.max(4, Math.min(run.x * scale, stageW - width - 4));
   const estH = 256;
@@ -1689,14 +1695,11 @@ function FontInfoPanel({
           <X size={14} />
         </button>
       </div>
-      <div className="font-panel-name" style={{ fontFamily: previewFamily }}>
+      <div className="font-panel-name" style={{ fontFamily: face.fontFamily }}>
         {run.fontLabel || 'Unbekannt'}
       </div>
       {/* The detected line drawn in its OWN typeface — an immediate, honest preview. */}
-      <div
-        className="font-panel-preview"
-        style={{ fontFamily: previewFamily, fontWeight: run.bold ? 700 : 400, fontStyle: run.italic ? 'italic' : 'normal', color }}
-      >
+      <div className="font-panel-preview" style={{ ...face, color }}>
         {sample}
       </div>
       <div className={`font-panel-badge ${run.embedded === true ? 'ok' : run.embedded === false ? 'warn' : 'neutral'}`}>

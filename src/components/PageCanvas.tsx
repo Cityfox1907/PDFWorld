@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useStore, visibleSize, MAX_ZOOM, MIN_ZOOM, type EditorPage } from '../state/store';
+import { useStore, visibleSize, type EditorPage } from '../state/store';
 import { useUI } from '../state/ui';
 import { viewportBridge } from '../state/viewport';
 import {
@@ -312,9 +312,17 @@ export function PageCanvas() {
   const pageSourceIndex = page?.sourceIndex;
   const pageBlank = page?.blank ?? false;
   useEffect(() => {
-    if (activeTool !== 'edit-text' || pageSourceKey === undefined || pageSourceIndex === undefined || pageBlank) {
+    if (activeTool !== 'edit-text') {
       setRuns([]);
       setPickedRun(null);
+      return;
+    }
+    // The scan tool is active but there is nothing to analyse (a freshly added blank page
+    // or a page with no embedded text). Say so, so tapping "Scan" never feels like a no-op.
+    if (pageSourceKey === undefined || pageSourceIndex === undefined || pageBlank) {
+      setRuns([]);
+      setPickedRun(null);
+      showToast('Leere Seite – kein Text zum Scannen.', 'info');
       return;
     }
     let cancelled = false;
@@ -325,6 +333,7 @@ export function PageCanvas() {
         if (cancelled) return;
         const lines = groupRunsIntoLines(r);
         setRuns(lines); // show the clickable boxes immediately
+        if (lines.length === 0) showToast('Kein bearbeitbarer Text auf dieser Seite gefunden.', 'info');
         setPickedRun(null);
         setScanId((n) => n + 1); // replay the scan sweep once per real scan
         // Remember each line's baseline AND left edge so a moved text box can snap
@@ -383,7 +392,7 @@ export function PageCanvas() {
     return () => {
       cancelled = true;
     };
-  }, [activeTool, engine, pageSourceKey, pageSourceIndex, pageBlank, rotation]);
+  }, [activeTool, engine, pageSourceKey, pageSourceIndex, pageBlank, rotation, showToast]);
 
   // ── zoom keeping a chosen anchor point perfectly stationary ──
   // Used by Ctrl/⌘+wheel and trackpad/touch pinch (anchor = the cursor) and by the
@@ -397,7 +406,7 @@ export function PageCanvas() {
     if (!area || !stage) return;
     const st = useStore.getState();
     const old = st.zoom;
-    const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number((old * factor).toFixed(2))));
+    const next = Math.max(st.minZoom, Math.min(st.maxZoom, Number((old * factor).toFixed(2))));
     if (next === old) return;
     const before = stage.getBoundingClientRect();
     const dx = clientX - before.left; // anchor offset inside the stage (old scale)

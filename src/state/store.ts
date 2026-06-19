@@ -117,6 +117,10 @@ interface StoreState {
   selectedElementIds: string[];
   activeTool: ToolId;
   zoom: number;
+  /** Active magnification clamp. Defaults to the module constants; the mobile shell
+   *  raises minZoom to 1 so the page can never be pinched smaller than "fit". */
+  minZoom: number;
+  maxZoom: number;
 
   formFields: FormField[];
   formValues: Record<string, string | boolean | string[]>;
@@ -151,6 +155,8 @@ interface StoreState {
   // ── tools / view ──
   setTool: (tool: ToolId) => void;
   setZoom: (zoom: number) => void;
+  /** Adjust the magnification clamp (and re-clamp the current zoom into it). */
+  setZoomLimits: (min: number, max: number) => void;
   setCurrentPage: (id: string) => void;
   selectElement: (id: string | null) => void;
   /** Replace the whole selection set (marquee / programmatic multi-select). */
@@ -266,6 +272,8 @@ export const useStore = create<StoreState>((set, get) => ({
   selectedElementIds: [],
   activeTool: 'select',
   zoom: 1,
+  minZoom: MIN_ZOOM,
+  maxZoom: MAX_ZOOM,
 
   formFields: [],
   formValues: {},
@@ -436,9 +444,14 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
   setZoom(zoom) {
-    // Up to 2000 % magnification (MIN 25 %). The page bitmap is resolution-capped
-    // in PageCanvas, so an extreme zoom stays visible instead of blanking out.
-    set({ zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number(zoom.toFixed(2)))) });
+    // Up to 2000 % magnification. The lower bound is mode-dependent (desktop 25 %, mobile
+    // 100 % = "fit") so a phone can never shrink the page into a useless speck. The page
+    // bitmap is resolution-capped in PageCanvas, so an extreme zoom stays visible.
+    const { minZoom, maxZoom } = get();
+    set({ zoom: Math.max(minZoom, Math.min(maxZoom, Number(zoom.toFixed(2)))) });
+  },
+  setZoomLimits(min, max) {
+    set((s) => ({ minZoom: min, maxZoom: max, zoom: Math.max(min, Math.min(max, s.zoom)) }));
   },
   setCurrentPage(id) {
     set({ currentPageId: id, selectedElementId: null, selectedElementIds: [] });

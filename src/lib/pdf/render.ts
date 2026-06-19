@@ -32,6 +32,10 @@ export interface FontInspection {
   data?: Uint8Array;
   /** mime type of `data`, e.g. "font/opentype" */
   mimetype?: string;
+  /** pdf.js's own weight/slant verdict (from the font descriptor flags), when known —
+   *  authoritative where a /BaseFont name doesn't spell out "Bold"/"Italic". */
+  bold?: boolean;
+  italic?: boolean;
 }
 
 /**
@@ -58,7 +62,7 @@ export async function inspectFonts(
       try {
         if (!page.commonObjs.has(name)) continue;
         const f = page.commonObjs.get(name) as
-          | { name?: string; data?: Uint8Array; mimetype?: string; missingFile?: boolean }
+          | { name?: string; data?: Uint8Array; mimetype?: string; missingFile?: boolean; bold?: boolean; italic?: boolean; black?: boolean }
           | null;
         if (!f) continue;
         const embedded = !f.missingFile && !!f.data && f.data.length > 0;
@@ -69,6 +73,10 @@ export async function inspectFonts(
           embedded,
           data: embedded ? f.data : undefined,
           mimetype: embedded ? f.mimetype || 'font/opentype' : undefined,
+          // pdf.js fills these from the font descriptor (fontExtraProperties); they catch
+          // a Bold/Italic face whose name doesn't say so.
+          bold: typeof f.bold === 'boolean' ? f.bold || !!f.black : undefined,
+          italic: typeof f.italic === 'boolean' ? f.italic : undefined,
         });
       } catch {
         /* this font stays undescribed → caller falls back to a standard font */

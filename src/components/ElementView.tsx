@@ -52,9 +52,13 @@ interface Props {
 }
 
 export function ElementView({ el, pageId, scale, editing, interactive, editTextMode, alignBaselines, alignXs, onAlignGuide, onAlignGuideX, onStartEdit, onEndEdit, updateElement, commit }: Props) {
-  const selectedId = useStore((s) => s.selectedElementId);
+  const isInSelection = useStore((s) => s.selectedElementIds.includes(el.id));
+  const selectionCount = useStore((s) => s.selectedElementIds.length);
   const selectElement = useStore((s) => s.selectElement);
-  const selected = selectedId === el.id && interactive;
+  const selected = isInSelection && interactive;
+  // Resize handles + the lock badge only make sense for a lone selection; a group shows
+  // just the outlines so it stays readable while several elements are picked.
+  const soloSelected = selected && selectionCount === 1;
   const locked = !!el.locked;
 
   // The lock badge flashes for 3 s whenever the element becomes (or is re-)selected,
@@ -91,51 +95,69 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       return;
     }
     e.stopPropagation();
-    selectElement(el.id);
+    const store = useStore.getState();
+    const selIds = store.selectedElementIds;
+    const alreadySelected = selIds.includes(el.id);
+    // Shift-click toggles this element in/out of the selection without moving anything.
+    if (e.shiftKey) {
+      store.toggleElementSelection(el.id);
+      return;
+    }
+    // A plain click on an element outside the current selection selects just it; clicking
+    // one that's already part of a multi-selection keeps the group so it can be dragged.
+    if (!alreadySelected) selectElement(el.id);
     flashLock();
     // A locked element is selectable (so it can be unlocked) but never moves.
     if (locked) return;
+
+    // The set that actually moves: the whole (unlocked) selection when dragging a group,
+    // otherwise just this element.
+    const groupIds = alreadySelected && selIds.length > 1 ? selIds : [el.id];
+    const page = store.pages.find((p) => p.id === pageId);
+    const members = (page?.elements ?? [])
+      .filter((m) => groupIds.includes(m.id) && !m.locked)
+      .map((m) => ({ id: m.id, x: m.x, y: m.y, points: m.type === 'ink' ? (m as InkElement).points.map((p) => ({ ...p })) : null }));
+    if (!members.length) return;
+    const single = members.length === 1;
+
     const startX = e.clientX;
     const startY = e.clientY;
-    const origin = { x: el.x, y: el.y };
-    const inkPoints = el.type === 'ink' ? (el as InkElement).points.map((p) => ({ ...p })) : null;
     let moved = false;
     const move = (ev: PointerEvent) => {
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
+      let dx = (ev.clientX - startX) / scale;
+      let dy = (ev.clientY - startY) / scale;
       if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
-      let nx = origin.x + dx;
-      let ny = origin.y + dy;
-      // Snap a moving TEXT box onto a neighbour's baseline (horizontal) or onto a
-      // neighbour's left edge (vertical) — both measured on the letters, not the box —
-      // so the starts of lists/paragraphs and shared baselines line up precisely. A
-      // gentle magnet (SNAP_TOL) makes exact alignment effortless without trapping a
-      // free move; the matching guide lights up while it's engaged.
+      // Baseline / left-edge snapping is an alignment aid for a SINGLE text box; a group
+      // drag moves everything rigidly so their relative layout is preserved.
       let guideY: number | null = null;
       let guideX: number | null = null;
-      if (el.type === 'text' && !el.rotation) {
+      if (single && el.type === 'text' && !el.rotation) {
         const size = (el as TextElement).size;
         const tol = SNAP_TOL / scale;
+        const ny = el.y + dy;
+        const nx = el.x + dx;
         if (alignBaselines && alignBaselines.length) {
           const snapY = nearestBaseline(ny + size * BASELINE_RATIO, alignBaselines, tol);
           if (snapY != null) {
-            ny = snapY - size * BASELINE_RATIO;
+            dy = snapY - size * BASELINE_RATIO - el.y;
             guideY = snapY;
           }
         }
         if (alignXs && alignXs.length) {
           const snapX = nearestBaseline(nx, alignXs, tol);
           if (snapX != null) {
-            nx = snapX;
+            dx = snapX - el.x;
             guideX = snapX;
           }
         }
       }
       onAlignGuide?.(guideY);
       onAlignGuideX?.(guideX);
-      const patch: ElementPatch = { x: nx, y: ny };
-      if (inkPoints) patch.points = inkPoints.map((p) => ({ x: p.x + (nx - origin.x), y: p.y + (ny - origin.y) }));
-      updateElement(pageId, el.id, patch);
+      for (const m of members) {
+        const patch: ElementPatch = { x: m.x + dx, y: m.y + dy };
+        if (m.points) patch.points = m.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+        updateElement(pageId, m.id, patch);
+      }
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
@@ -143,6 +165,9 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       onAlignGuide?.(null);
       onAlignGuideX?.(null);
       if (moved) commit();
+      // A click (no drag) on a member of a multi-selection narrows it down to just that
+      // element — so a group can be broken back into a single pick without a detour.
+      else if (alreadySelected && groupIds.length > 1) selectElement(el.id);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -209,14 +234,14 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       onDoubleClick={() => (el.type === 'text' || el.type === 'callout') && interactive && !locked && onStartEdit()}
     >
       <ElementBody el={el} scale={scale} editing={editing} onEndEdit={onEndEdit} updateElement={updateElement} pageId={pageId} />
-      {selected && !editing && !locked && (
+      {soloSelected && !editing && !locked && (
         <>
           {HANDLES.map((h) => (
             <span key={h} className={`handle ${h}`} onPointerDown={(e) => startResize(e, h)} />
           ))}
         </>
       )}
-      {selected && !editing && lockVisible && (
+      {soloSelected && !editing && lockVisible && (
         <button
           className={`el-lock ${locked ? 'on' : ''}`}
           onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
@@ -334,11 +359,9 @@ function ElementBody({
               onBlur={onEndEdit}
               onPointerDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
-                // Enter finishes the field (Shift+Enter adds a line); Escape also exits.
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  e.currentTarget.blur();
-                } else if (e.key === 'Escape') {
+                // Enter starts a new line / paragraph (multi-line text); Escape — or
+                // clicking anywhere else — finishes the field.
+                if (e.key === 'Escape') {
                   e.preventDefault();
                   e.currentTarget.blur();
                 }

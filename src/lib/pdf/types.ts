@@ -98,6 +98,12 @@ export interface TextElement extends BaseElement {
    * the bake layer embeds the *original* font so the replacement matches exactly.
    */
   embeddedFontId?: string;
+  /**
+   * Human-friendly name of the typeface this text was adopted from (scan editor).
+   * Shown in the inspector so a box carrying an embedded original reads with its real
+   * name instead of the generic fallback family. Purely informational.
+   */
+  fontLabel?: string;
 }
 
 export interface RectElement extends BaseElement {

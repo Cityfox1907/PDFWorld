@@ -60,10 +60,8 @@ export interface ToolDefaults {
   highlightWidth: number;
   drawColor: string;
   drawWidth: number;
-  /** stroke opacity for the pen/marker (0.05–1) */
+  /** stroke opacity for the pen (0.05–1) */
   drawOpacity: number;
-  /** pen = opaque line, marker = translucent Multiply stroke (like a highlighter) */
-  drawStyle: 'pen' | 'marker';
   /** line style for the pen: solid, dashed or dotted */
   drawDash: 'solid' | 'dashed' | 'dotted';
   shapeFill: string;
@@ -100,6 +98,8 @@ export interface PendingTextStyle {
   color: string;
   lineHeight: number;
   embeddedFontId?: string;
+  /** real typeface name of the adopted line, shown in the inspector after placing */
+  fontLabel?: string;
 }
 
 interface StoreState {
@@ -111,7 +111,10 @@ interface StoreState {
 
   pages: EditorPage[];
   currentPageId: string | null;
+  /** the "primary" selected element (drives the inspector); mirrors the last of the set */
   selectedElementId: string | null;
+  /** every selected element id — a marquee or shift-click can select several at once */
+  selectedElementIds: string[];
   activeTool: ToolId;
   zoom: number;
 
@@ -129,8 +132,8 @@ interface StoreState {
   clipboard: AnyElement | null;
   /** A typeface armed from the scan panel; the next click places a field in it. */
   pendingTextStyle: PendingTextStyle | null;
-  /** Open image editor (crop / background removal), targeting an image element. */
-  imageEditor: { id: string; mode: 'crop' | 'bg' } | null;
+  /** Open image editor (crop), targeting an image element. */
+  imageEditor: { id: string } | null;
 
   past: Snapshot[];
   future: Snapshot[];
@@ -141,6 +144,8 @@ interface StoreState {
   // ── lifecycle ──
   loadFile: (file: File) => Promise<void>;
   mergeFile: (file: File) => Promise<void>;
+  /** Start a brand-new, empty document with a single blank A4 page. */
+  newDocument: () => Promise<void>;
   reset: () => Promise<void>;
 
   // ── tools / view ──
@@ -148,13 +153,17 @@ interface StoreState {
   setZoom: (zoom: number) => void;
   setCurrentPage: (id: string) => void;
   selectElement: (id: string | null) => void;
+  /** Replace the whole selection set (marquee / programmatic multi-select). */
+  selectElements: (ids: string[]) => void;
+  /** Add or remove one element from the current selection (shift-click). */
+  toggleElementSelection: (id: string) => void;
   setToolDefaults: (patch: Partial<ToolDefaults>) => void;
   /** Remember a colour at the front of the recent list (deduped, capped). */
   addRecentColor: (color: string) => void;
   /** Arm (or clear) the typeface that the next page click writes in. */
   setPendingTextStyle: (style: PendingTextStyle | null) => void;
-  /** Open / close the image editor (crop or background removal) for an element. */
-  openImageEditor: (id: string, mode: 'crop' | 'bg') => void;
+  /** Open / close the image editor (crop) for an element. */
+  openImageEditor: (id: string) => void;
   closeImageEditor: () => void;
 
   // ── elements ──
@@ -163,6 +172,8 @@ interface StoreState {
   addElements: (pageId: string, els: AnyElement[], selectId?: string) => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
   deleteElement: (pageId: string, id: string) => void;
+  /** Delete several elements in ONE history step (multi-selection). */
+  deleteElements: (pageId: string, ids: string[]) => void;
   duplicateElement: (pageId: string, id: string) => void;
   reorderElement: (pageId: string, id: string, dir: 'front' | 'back') => void;
   /** Copy the selected element to the in-app clipboard (no history change). */
@@ -198,12 +209,11 @@ const DEFAULT_TOOL: ToolDefaults = {
   textFamily: 'arial',
   textSize: 9,
   highlightColor: '#ffd84d',
-  highlightMode: 'rect',
+  highlightMode: 'brush',
   highlightWidth: 16,
   drawColor: '#1a1a1a',
   drawWidth: 2.5,
   drawOpacity: 1,
-  drawStyle: 'pen',
   drawDash: 'solid',
   shapeFill: '#ffffff',
   shapeStroke: '#111111',
@@ -244,6 +254,7 @@ export const useStore = create<StoreState>((set, get) => ({
   pages: [],
   currentPageId: null,
   selectedElementId: null,
+  selectedElementIds: [],
   activeTool: 'select',
   zoom: 1,
 
@@ -296,6 +307,7 @@ export const useStore = create<StoreState>((set, get) => ({
         pages,
         currentPageId: pages[0]?.id ?? null,
         selectedElementId: null,
+        selectedElementIds: [],
         activeTool: 'select',
         zoom: 1,
         formFields,
@@ -344,6 +356,43 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
 
+  async newDocument() {
+    // A fresh document needs no source PDF: a single blank page is enough, and the
+    // export path assembles blank pages without any source (see PdfEngine.export).
+    await get().engine.disposeAll();
+    const id = uid('pg');
+    set({
+      status: 'ready',
+      error: null,
+      fileName: 'Neues Dokument.pdf',
+      fileSize: 0,
+      pages: [
+        {
+          id,
+          sourceKey: BLANK_SOURCE,
+          sourceIndex: 0,
+          baseRotation: 0,
+          addedRotation: 0,
+          mediaWidth: A4_PORTRAIT.width,
+          mediaHeight: A4_PORTRAIT.height,
+          blank: true,
+          elements: [],
+        },
+      ],
+      currentPageId: id,
+      selectedElementId: null,
+      selectedElementIds: [],
+      activeTool: 'select',
+      zoom: 1,
+      formFields: [],
+      formValues: {},
+      flattenForm: false,
+      xfaForm: false,
+      past: [],
+      future: [],
+    });
+  },
+
   async reset() {
     await get().engine.disposeAll();
     set({
@@ -354,6 +403,7 @@ export const useStore = create<StoreState>((set, get) => ({
       pages: [],
       currentPageId: null,
       selectedElementId: null,
+      selectedElementIds: [],
       activeTool: 'select',
       zoom: 1,
       formFields: [],
@@ -366,9 +416,11 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setTool(tool) {
+    const keepSel = tool === 'select';
     set({
       activeTool: tool,
-      selectedElementId: tool === 'select' ? get().selectedElementId : null,
+      selectedElementId: keepSel ? get().selectedElementId : null,
+      selectedElementIds: keepSel ? get().selectedElementIds : [],
       // An armed scan typeface only survives while the text tool is active (it is placed
       // on the next click); choosing any other tool discards it.
       pendingTextStyle: tool === 'text' ? get().pendingTextStyle : null,
@@ -380,10 +432,21 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number(zoom.toFixed(2)))) });
   },
   setCurrentPage(id) {
-    set({ currentPageId: id, selectedElementId: null });
+    set({ currentPageId: id, selectedElementId: null, selectedElementIds: [] });
   },
   selectElement(id) {
-    set({ selectedElementId: id });
+    set({ selectedElementId: id, selectedElementIds: id ? [id] : [] });
+  },
+  selectElements(ids) {
+    const unique = [...new Set(ids)];
+    set({ selectedElementIds: unique, selectedElementId: unique.length ? unique[unique.length - 1] : null });
+  },
+  toggleElementSelection(id) {
+    set((s) => {
+      const has = s.selectedElementIds.includes(id);
+      const next = has ? s.selectedElementIds.filter((x) => x !== id) : [...s.selectedElementIds, id];
+      return { selectedElementIds: next, selectedElementId: next.length ? next[next.length - 1] : null };
+    });
   },
   setToolDefaults(patch) {
     set((s) => ({ tool: { ...s.tool, ...patch } }));
@@ -395,8 +458,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setPendingTextStyle(style) {
     set({ pendingTextStyle: style });
   },
-  openImageEditor(id, mode) {
-    set({ imageEditor: { id, mode }, selectedElementId: id });
+  openImageEditor(id) {
+    set({ imageEditor: { id }, selectedElementId: id, selectedElementIds: [id] });
   },
   closeImageEditor() {
     set({ imageEditor: null });
@@ -407,14 +470,17 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       pages: s.pages.map((p) => (p.id === pageId ? { ...p, elements: [...p.elements, el] } : p)),
       selectedElementId: el.id,
+      selectedElementIds: [el.id],
     }));
   },
   addElements(pageId, els, selectId) {
     if (!els.length) return;
     get().commit();
+    const sel = selectId ?? els[els.length - 1].id;
     set((s) => ({
       pages: s.pages.map((p) => (p.id === pageId ? { ...p, elements: [...p.elements, ...els] } : p)),
-      selectedElementId: selectId ?? els[els.length - 1].id,
+      selectedElementId: sel,
+      selectedElementIds: [sel],
     }));
   },
   updateElement(pageId, id, patch) {
@@ -431,6 +497,17 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       pages: s.pages.map((p) => (p.id === pageId ? { ...p, elements: p.elements.filter((e) => e.id !== id) } : p)),
       selectedElementId: null,
+      selectedElementIds: [],
+    }));
+  },
+  deleteElements(pageId, ids) {
+    if (!ids.length) return;
+    get().commit();
+    const remove = new Set(ids);
+    set((s) => ({
+      pages: s.pages.map((p) => (p.id === pageId ? { ...p, elements: p.elements.filter((e) => !remove.has(e.id)) } : p)),
+      selectedElementId: null,
+      selectedElementIds: [],
     }));
   },
   duplicateElement(pageId, id) {
@@ -489,7 +566,7 @@ export const useStore = create<StoreState>((set, get) => ({
       const idx = s.pages.findIndex((p) => p.id === id);
       const pages = s.pages.filter((p) => p.id !== id);
       const currentPageId = s.currentPageId === id ? pages[Math.min(idx, pages.length - 1)]?.id ?? null : s.currentPageId;
-      return { pages, currentPageId, selectedElementId: null };
+      return { pages, currentPageId, selectedElementId: null, selectedElementIds: [] };
     });
   },
   duplicatePage(id) {
@@ -552,6 +629,7 @@ export const useStore = create<StoreState>((set, get) => ({
         pages: prev.pages,
         formValues: prev.formValues,
         selectedElementId: prev.selectedElementId,
+        selectedElementIds: prev.selectedElementId ? [prev.selectedElementId] : [],
         currentPageId: prev.currentPageId ?? s.currentPageId,
       };
     });
@@ -566,6 +644,7 @@ export const useStore = create<StoreState>((set, get) => ({
         pages: next.pages,
         formValues: next.formValues,
         selectedElementId: next.selectedElementId,
+        selectedElementIds: next.selectedElementId ? [next.selectedElementId] : [],
         currentPageId: next.currentPageId ?? s.currentPageId,
       };
     });

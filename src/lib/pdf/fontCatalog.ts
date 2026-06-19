@@ -1,5 +1,5 @@
 import type { BaseFamily } from './types';
-import { compactFontName } from './fonts';
+import { compactFontName, prettyFontName, isGenericFontLabel, isInternalFontName } from './fonts';
 
 /**
  * Curated catalogue of the ~90 most-used document fonts.
@@ -172,6 +172,95 @@ const WEB: Omit<FontDef, 'group'>[] = [
   { key: 'ibm-plex-mono', label: 'IBM Plex Mono', base: 'mono', web: W([400, 700]) },
   { key: 'fira-code', label: 'Fira Code', base: 'mono', web: W([400, 700], false) },
   { key: 'ubuntu-mono', label: 'Ubuntu Mono', base: 'mono', web: W([400, 700]) },
+
+  // ── +metric-compatible faces (the closest possible web match for the most common
+  //    document fonts, so Arial/Times/Calibri/Georgia/Cambria can be embedded 1:1) ──
+  { key: 'arimo', label: 'Arimo (Arial-kompatibel)', base: 'sans', web: W([400, 700]) },
+  { key: 'tinos', label: 'Tinos (Times-kompatibel)', base: 'serif', web: W([400, 700]) },
+  { key: 'cousine', label: 'Cousine (Courier-kompatibel)', base: 'mono', web: W([400, 700]) },
+  { key: 'carlito', label: 'Carlito (Calibri-kompatibel)', base: 'sans', web: W([400, 700]) },
+  { key: 'caladea', label: 'Caladea (Cambria-kompatibel)', base: 'serif', web: W([400, 700]) },
+  { key: 'gelasio', label: 'Gelasio (Georgia-kompatibel)', base: 'serif', web: W([400, 700]) },
+
+  // ── +another wave of widely-used document & UI fonts ──
+  // sans
+  { key: 'outfit', label: 'Outfit', base: 'sans', web: W([400, 700], false) },
+  { key: 'onest', label: 'Onest', base: 'sans', web: W([400, 700], false) },
+  { key: 'chivo', label: 'Chivo', base: 'sans', web: W([400, 700]) },
+  { key: 'league-spartan', label: 'League Spartan', base: 'sans', web: W([400, 700], false) },
+  { key: 'public-sans', label: 'Public Sans', base: 'sans', web: W([400, 700]) },
+  { key: 'hanken-grotesk', label: 'Hanken Grotesk', base: 'sans', web: W([400, 700]) },
+  { key: 'instrument-sans', label: 'Instrument Sans', base: 'sans', web: W([400, 700]) },
+  { key: 'schibsted-grotesk', label: 'Schibsted Grotesk', base: 'sans', web: W([400, 700]) },
+  { key: 'bricolage-grotesque', label: 'Bricolage Grotesque', base: 'sans', web: W([400, 700], false) },
+  { key: 'syne', label: 'Syne', base: 'sans', web: W([400, 700], false) },
+  { key: 'sofia-sans', label: 'Sofia Sans', base: 'sans', web: W([400, 700]) },
+  { key: 'readex-pro', label: 'Readex Pro', base: 'sans', web: W([400, 700], false) },
+  { key: 'albert-sans', label: 'Albert Sans', base: 'sans', web: W([400, 700]) },
+  { key: 'darker-grotesque', label: 'Darker Grotesque', base: 'sans', web: W([400, 700], false) },
+  { key: 'oxygen', label: 'Oxygen', base: 'sans', web: W([400, 700], false) },
+  { key: 'questrial', label: 'Questrial', base: 'sans', web: W([400], false) },
+  { key: 'abel', label: 'Abel', base: 'sans', web: W([400], false) },
+  { key: 'acme', label: 'Acme', base: 'sans', web: W([400], false) },
+  { key: 'didact-gothic', label: 'Didact Gothic', base: 'sans', web: W([400], false) },
+  { key: 'fredoka', label: 'Fredoka', base: 'sans', web: W([400, 700], false) },
+  { key: 'baloo-2', label: 'Baloo 2', base: 'sans', web: W([400, 700], false) },
+  { key: 'prompt', label: 'Prompt', base: 'sans', web: W([400, 700]) },
+  { key: 'sarabun', label: 'Sarabun', base: 'sans', web: W([400, 700]) },
+  { key: 'tajawal', label: 'Tajawal', base: 'sans', web: W([400, 700], false) },
+  { key: 'teko', label: 'Teko', base: 'sans', web: W([400, 700], false) },
+  { key: 'rajdhani', label: 'Rajdhani', base: 'sans', web: W([400, 700], false) },
+  { key: 'antonio', label: 'Antonio', base: 'sans', web: W([400, 700], false) },
+  { key: 'staatliches', label: 'Staatliches', base: 'sans', web: W([400], false) },
+  { key: 'orbitron', label: 'Orbitron', base: 'sans', web: W([400, 700], false) },
+  { key: 'jura', label: 'Jura', base: 'sans', web: W([400, 700], false) },
+  { key: 'encode-sans', label: 'Encode Sans', base: 'sans', web: W([400, 700], false) },
+  { key: 'barlow-condensed', label: 'Barlow Condensed', base: 'sans', web: W([400, 700]) },
+  { key: 'barlow-semi-condensed', label: 'Barlow Semi Condensed', base: 'sans', web: W([400, 700]) },
+  { key: 'saira-condensed', label: 'Saira Condensed', base: 'sans', web: W([400, 700], false) },
+  { key: 'pathway-gothic-one', label: 'Pathway Gothic One', base: 'sans', web: W([400], false) },
+  // serif
+  { key: 'vollkorn', label: 'Vollkorn', base: 'serif', web: W([400, 700]) },
+  { key: 'cardo', label: 'Cardo', base: 'serif', web: W([400, 700]) },
+  { key: 'cormorant-garamond', label: 'Cormorant Garamond', base: 'serif', web: W([400, 700]) },
+  { key: 'dm-serif-display', label: 'DM Serif Display', base: 'serif', web: W([400]) },
+  { key: 'dm-serif-text', label: 'DM Serif Text', base: 'serif', web: W([400]) },
+  { key: 'bree-serif', label: 'Bree Serif', base: 'serif', web: W([400], false) },
+  { key: 'rokkitt', label: 'Rokkitt', base: 'serif', web: W([400, 700], false) },
+  { key: 'aleo', label: 'Aleo', base: 'serif', web: W([400, 700]) },
+  { key: 'frank-ruhl-libre', label: 'Frank Ruhl Libre', base: 'serif', web: W([400, 700], false) },
+  { key: 'newsreader', label: 'Newsreader', base: 'serif', web: W([400, 700]) },
+  { key: 'literata', label: 'Literata', base: 'serif', web: W([400, 700]) },
+  { key: 'libre-caslon-text', label: 'Libre Caslon Text', base: 'serif', web: W([400, 700]) },
+  { key: 'old-standard-tt', label: 'Old Standard TT', base: 'serif', web: W([400, 700]) },
+  { key: 'noticia-text', label: 'Noticia Text', base: 'serif', web: W([400, 700]) },
+  { key: 'crimson-pro', label: 'Crimson Pro', base: 'serif', web: W([400, 700]) },
+  { key: 'petrona', label: 'Petrona', base: 'serif', web: W([400, 700]) },
+  { key: 'neuton', label: 'Neuton', base: 'serif', web: W([400, 700], false) },
+  { key: 'gentium-plus', label: 'Gentium Plus', base: 'serif', web: W([400, 700]) },
+  { key: 'sorts-mill-goudy', label: 'Sorts Mill Goudy', base: 'serif', web: W([400]) },
+  // mono
+  { key: 'fira-mono', label: 'Fira Mono', base: 'mono', web: W([400, 700], false) },
+  { key: 'pt-mono', label: 'PT Mono', base: 'mono', web: W([400], false) },
+  { key: 'dm-mono', label: 'DM Mono', base: 'mono', web: W([400]) },
+  { key: 'overpass-mono', label: 'Overpass Mono', base: 'mono', web: W([400, 700], false) },
+  { key: 'red-hat-mono', label: 'Red Hat Mono', base: 'mono', web: W([400, 700]) },
+  { key: 'anonymous-pro', label: 'Anonymous Pro', base: 'mono', web: W([400, 700]) },
+  { key: 'b612-mono', label: 'B612 Mono', base: 'mono', web: W([400, 700]) },
+  { key: 'spline-sans-mono', label: 'Spline Sans Mono', base: 'mono', web: W([400, 700]) },
+  // handwriting / script — common in signatures & informal documents
+  { key: 'caveat', label: 'Caveat', base: 'sans', web: W([400, 700], false) },
+  { key: 'dancing-script', label: 'Dancing Script', base: 'serif', web: W([400, 700], false) },
+  { key: 'pacifico', label: 'Pacifico', base: 'serif', web: W([400], false) },
+  { key: 'lobster', label: 'Lobster', base: 'serif', web: W([400], false) },
+  { key: 'satisfy', label: 'Satisfy', base: 'serif', web: W([400], false) },
+  { key: 'great-vibes', label: 'Great Vibes', base: 'serif', web: W([400], false) },
+  { key: 'sacramento', label: 'Sacramento', base: 'serif', web: W([400], false) },
+  { key: 'shadows-into-light', label: 'Shadows Into Light', base: 'sans', web: W([400], false) },
+  { key: 'indie-flower', label: 'Indie Flower', base: 'sans', web: W([400], false) },
+  { key: 'permanent-marker', label: 'Permanent Marker', base: 'sans', web: W([400], false) },
+  { key: 'courgette', label: 'Courgette', base: 'serif', web: W([400], false) },
+  { key: 'kalam', label: 'Kalam', base: 'sans', web: W([400, 700], false) },
 ];
 
 export const FONT_CATALOG: FontDef[] = [
@@ -201,32 +290,68 @@ export function baseFamilyOf(key: string): BaseFamily {
  * family — so the panel name and the typeface actually used never disagree.
  */
 const FONT_ALIASES: Record<string, string> = {
+  // Arial & metric clones
   arialmt: 'arial',
   arial: 'arial',
   arialnarrow: 'arial',
   arialblack: 'arial',
   ariaunicodems: 'arial',
+  liberationsans: 'arial',
+  nimbussans: 'arial',
+  nimbussansl: 'arial',
+  arimo: 'arimo',
+  // Helvetica
   helvetica: 'helvetica',
   helveticaneue: 'helvetica',
   helveticalt: 'helvetica',
   helveticaltstd: 'helvetica',
+  // Times & metric clones
   times: 'times-new-roman',
   timesroman: 'times-new-roman',
   timesnewroman: 'times-new-roman',
   timesnewromanps: 'times-new-roman',
+  liberationserif: 'times-new-roman',
+  nimbusroman: 'times-new-roman',
+  nimbusromanno9l: 'times-new-roman',
+  tinos: 'tinos',
+  // Courier & metric clones
   couriernew: 'courier-new',
   couriernewps: 'courier-new',
   courier: 'courier-new',
   courierstd: 'courier-new',
+  liberationmono: 'courier-new',
+  nimbusmono: 'courier-new',
+  cousine: 'cousine',
+  // common OS / Office faces
   trebuchetms: 'trebuchet',
   segoeui: 'segoe-ui',
   calibri: 'calibri',
+  carlito: 'carlito',
   cambria: 'cambria',
+  caladea: 'caladea',
   consolas: 'consolas',
   georgia: 'georgia',
+  gelasio: 'gelasio',
   verdana: 'verdana',
+  dejavusans: 'verdana',
   tahoma: 'tahoma',
   garamond: 'garamond',
+  ebgaramond: 'eb-garamond',
+  bookantiqua: 'georgia',
+  palatino: 'georgia',
+  palatinolinotype: 'georgia',
+  // popular web faces whose PostScript name compacts differently from the label
+  robotocondensed: 'roboto-condensed',
+  ptsans: 'pt-sans',
+  ptserif: 'pt-serif',
+  notosans: 'noto-sans',
+  notoserif: 'noto-serif',
+  sourcesanspro: 'source-sans-3',
+  sourceserifpro: 'source-serif-4',
+  sourcecodepro: 'source-code-pro',
+  ibmplexsans: 'ibm-plex-sans',
+  ibmplexserif: 'ibm-plex-serif',
+  ibmplexmono: 'ibm-plex-mono',
 };
 
 /** Compacted catalogue label *and* key → key, for exact hits like "roboto". */
@@ -269,6 +394,31 @@ export function matchCatalogFontKey(rawName: string | undefined | null): string 
     }
   }
   return null;
+}
+
+/**
+ * Resolve the *display name* for a scanned line's font — the single source of truth
+ * the font panel and inspector show. The rule keeps the shown name honest, so the
+ * preview and the text actually written never disagree:
+ *
+ *   • a name in our catalogue → the canonical label (Arial, Roboto, Times New Roman …)
+ *     — we can reproduce it exactly with the matching web/standard font.
+ *   • a font the PDF embeds → its cleaned real name — we reuse the original 1:1.
+ *   • a bare generic family (pdf.js fallback) → a friendly family name (Sans-Serif …),
+ *     which we render with the metric-matching standard font.
+ *   • anything else (a specific face we can neither match nor embed, or an internal
+ *     pdf.js placeholder) → "Unbekannt", since we can't reproduce it faithfully.
+ */
+export function fontDisplayName(rawName: string | undefined | null, embedded: boolean): string {
+  const key = matchCatalogFontKey(rawName);
+  if (key) return fontDef(key).label;
+  if (isGenericFontLabel(rawName)) return prettyFontName(rawName); // "Sans-Serif", "Serif", …
+  if (isInternalFontName(rawName)) return 'Unbekannt';
+  const pretty = prettyFontName(rawName);
+  if (!pretty || pretty === 'Unbekannt') return 'Unbekannt';
+  // A specific, real face: only claim it when we can actually reproduce it (the PDF
+  // embeds the original); otherwise we'd show one font and write another.
+  return embedded ? pretty : 'Unbekannt';
 }
 
 /** CSS font-family stack for previewing a font on screen (real font + system fallback). */

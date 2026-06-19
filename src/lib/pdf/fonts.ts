@@ -133,10 +133,13 @@ export function isInternalFontName(name: string | undefined | null): boolean {
 
 /**
  * Turn the raw PDF font name pdf.js reports (e.g. "ABCDEE+TimesNewRomanPS-BoldMT")
- * into a readable label for the scan editor's font panel. Strips the 6-letter
- * subset prefix and the PostScript "MT"/"PS" suffixes, normalises separators, and
- * maps the bare generic families to friendly names. Never empty — falls back to
- * the raw name so the user always sees *something*.
+ * into a clean, readable label for the scan editor's font panel.
+ *
+ * It strips the 6-letter subset prefix and the PostScript "MT"/"PS" suffixes,
+ * normalises separators AND splits the run-together CamelCase names that PDFs love
+ * ("PaalalabasDisplayCondensedBETA" → "Paalalabas Display Condensed BETA"), and maps
+ * the bare generic families to friendly names. Returns "Unbekannt" only when nothing
+ * usable remains, so the panel never shows an empty or cryptic blob.
  */
 export function prettyFontName(rawName: string | undefined | null): string {
   let s = (rawName ?? '').trim();
@@ -145,9 +148,17 @@ export function prettyFontName(rawName: string | undefined | null): string {
   if (generic) return generic;
   s = s.replace(/^[A-Za-z]{6}\+/, ''); // drop subset prefix "ABCDEE+"
   s = s.replace(/[-_]+/g, ' '); // separators → spaces
-  s = s.replace(/PSMT\b/gi, '').replace(/MT\b/g, '').replace(/PS\b/g, ''); // PostScript suffixes
+  // Split the run-together names PDFs embed so each word reads on its own:
+  //   lower/digit → Upper  ("DisplayCondensed" → "Display Condensed")
+  //   ACRONYM → Word       ("BETABold"        → "BETA Bold")
+  //   word → number        ("Exo2"            → "Exo 2")
+  s = s.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  s = s.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  s = s.replace(/([a-zA-Z])([0-9])/g, '$1 $2');
+  // PostScript / foundry suffixes that aren't part of the readable name.
+  s = s.replace(/\bPSMT\b/gi, '').replace(/\bMT\b/g, '').replace(/\bPS\b/g, '');
   s = s.replace(/\s+/g, ' ').trim();
-  return s || (rawName ?? 'Unbekannt');
+  return s || 'Unbekannt';
 }
 
 /**

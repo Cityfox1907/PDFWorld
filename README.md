@@ -10,26 +10,36 @@ die bestehenden Seiten eingezeichnet.
 ## Funktionen
 
 ### 1. Seitenverwaltung (verlustfrei)
+- Start mit einer **leeren Seite** oder einem **hochgeladenen PDF** (beides direkt
+  auf der Startseite)
 - Mehrere PDFs **zusammenführen**
 - Seiten per **Drag & Drop sortieren**
 - Seiten **einfügen** (leer, über das **+** an jeder Seite), **duplizieren**,
   **löschen**, **drehen**
 - **Seiten anordnen (Vollbild)** – ein Umschalter öffnet alle Seiten in einem
-  grossen Raster, ideal um auch 30–40 Seiten bequem zu sortieren
+  grossen Raster; oben rechts lassen sich eine **leere Seite** oder ein **weiteres
+  PDF** anfügen, ideal um auch 30–40 Seiten bequem zu sortieren
 
 ### 2. Bearbeitung
 - **Text scannen & bearbeiten** – ein Scan erkennt jede Textzeile und bündelt sie
   zu klickbaren Blöcken. Beim Antippen zeigt ein **Schrift-Panel** den echten
   Schriftnamen, eine **Vorschau in genau dieser Schrift**, Grösse, Stil und Farbe
   der Zeile und ob die **Originalschrift** eingebettet (und damit 1:1 nutzbar) ist.
-  Generische Namen wie „sans-serif“ werden korrekt der richtigen Familie zugeordnet
-  und bekannte Schriften (Arial, Times New Roman, Roboto …) exakt benannt – so
-  stimmen angezeigter Name und tatsächlich genutzte Schrift immer überein. Mit
+  Die Erkennung greift auf eine **grosse Schrift-Datenbank** (über 150 Faces) zu und
+  säubert run-together-Namen aus dem PDF („PaalalabasDisplayCondensedBETA“ →
+  „Paalalabas Display Condensed BETA“). Bekannte Schriften (Arial, Times New Roman,
+  Roboto …) werden **exakt benannt**, eingebettete Originale mit ihrem echten Namen
+  gezeigt – lässt sich eine Schrift weder zuordnen noch einbetten, steht ehrlich
+  **„Unbekannt“**, damit angezeigter Name und tatsächlich genutzte Schrift nie
+  auseinanderfallen. Mit
   **„In dieser Schrift schreiben“** wird die Schrift **übernommen** – der **nächste
   Klick auf die Seite** setzt dort ein leeres Textfeld in **exakt dieser Schrift**
   (gleiche Grösse, gleicher Stil mit **Fett/Kursiv**, gleiche Farbe), **ohne
   Hintergrund-Abdeckung**, sodass das Original darunter unangetastet bleibt. So
   wählst du frei, **wohin** der Text kommt, statt ihn fest auf die Zeile zu setzen
+- **Mehrfachauswahl** – mit dem Auswählen-Werkzeug einen **Rahmen aufziehen**, um
+  mehrere Elemente auf einmal zu markieren (Shift-Klick fügt einzelne hinzu/entfernt
+  sie); danach lassen sie sich **gemeinsam verschieben**, duplizieren oder löschen
 - **Pixelgenaue Ausrichtung** – ausgewählte Felder lassen sich mit den **Pfeiltasten**
   Pixel für Pixel verschieben (1 px, mit Shift 10 px – unabhängig vom Zoom)
 - **Ausrichten mit Hilfslinien** – beim Verschieben eines Textfelds rastet es sanft auf
@@ -49,7 +59,8 @@ die bestehenden Seiten eingezeichnet.
 - **Sperren** – ein Element gegen versehentliches Verschieben sichern; ein dezentes
   Schloss-Symbol oben rechts erscheint kurz beim Anwählen zum Ent-/Sperren
 - **Direkt tippen** – ein neues Textfeld landet genau auf der angeklickten Linie und
-  ist sofort beschreibbar; **Enter** schliesst ab, **Shift + Enter** macht einen Umbruch
+  ist sofort beschreibbar; **Enter** beginnt einen neuen Absatz, **Esc** (oder ein Klick
+  daneben) schliesst ab
 - **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
   Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied. Wahlweise als
   **freier Pinselstrich** oder als **randloses Rechteck** (ein Aufziehen füllt den
@@ -57,30 +68,29 @@ die bestehenden Seiten eingezeichnet.
   wandert in die **Farbauswahl** und lässt sich per Klick als Schriftfarbe
   weiterverwenden
 - **Neuen Text** hinzufügen – Standard **Grösse 9** und **Schwarz**, Auswahl aus
-  einem Font-Picker mit **~90 Schriften**, der jeden Namen in seiner eigenen Schrift
-  zeigt (System-, Standard- & Web-Schriften). Das Feld wird **mittig auf den Klick**
-  gesetzt, sodass der Text genau dort landet, wo geklickt wurde. **Listen** (Aufzählung
-  oder nummeriert) lassen sich pro Textfeld einschalten
+  einem Font-Picker mit **über 150 Schriften** (inkl. metrik-kompatibler Faces wie
+  Arimo/Tinos/Carlito für Arial/Times/Calibri), der jeden Namen in seiner eigenen
+  Schrift zeigt (System-, Standard- & Web-Schriften). Das Feld wird **mittig auf den
+  Klick** gesetzt, sodass der Text genau dort landet, wo geklickt wurde. Beim Tippen
+  fügt **Enter** einen neuen Absatz ein und das Feld **wächst mit**. **Listen**
+  (Aufzählung oder nummeriert) lassen sich pro Textfeld einschalten
 - **Sprechblasen / Kommentare** – eine **Sprechblase** mit Zeiger als Notiz auf der
   Seite platzieren (Umschalter im Text-Werkzeug), mit eigener Schrift- und Blasenfarbe
 - **Elemente (Formen)** – ein **Formen-Menü** in der Werkzeugleiste mit Rechteck,
-  Ellipse, Dreieck, Raute, Stern, Pfeil und Linie; Füllung, Rand, Randstil und Drehung
-  frei einstellbar
+  Ellipse, Dreieck, Raute, Stern, Pfeil und Linie; ein **einzelner Klick** setzt die
+  Form in Standardgrösse (Aufziehen für eine eigene Grösse bleibt möglich); Füllung,
+  Rand, Randstil und Drehung frei einstellbar
 - **Farbauswahl** – ein aufgeräumter Farbwähler mit kuratierter Palette, zuletzt
   verwendeten Tönen und – wo der Browser es unterstützt – einer **Pipette**, die eine
   Farbe direkt aus dem Dokument aufnimmt
 - **Formulare ausfüllen** – interaktive AcroForm-Felder werden erkannt und befüllt
 - **Unterschrift** zeichnen oder als Bild hochladen
 - **Bilder** platzieren und **bearbeiten** – **zuschneiden** (Ränder per Griffe
-  anpassen), mit einem **Rand** versehen (Dicke · Stil · Farbe) und den **Hintergrund
-  entfernen**: ein automatischer Magic-Wand löst einfarbige/ähnliche Hintergründe von
-  den Rändern her (mit Toleranz-Regler), feine **Behalten/Entfernen-Pinsel** bessern
-  von Hand nach – verlustfrei in voller Bildauflösung angewandt
-- **Markieren** – als **Rechteck** über eine Textzeile oder als **Textmarker-Stift**
-  mit ovaler Spitze frei über den Text gezeichnet (echter Multiply-Blend, damit der
-  Text darunter lesbar bleibt)
-- **Freihändig zeichnen** – ein vollwertiges Zeichen-Werkzeug mit **Stift** oder
-  **Marker** (durchscheinender Multiply-Strich), frei wählbarer **Farbe**, **Stärke**
+  anpassen) und mit einem **Rand** versehen (Dicke · Stil · Farbe)
+- **Markieren** – als **Textmarker-Stift** mit ovaler Spitze frei über den Text
+  gezeichnet (Standard) oder als **Rechteck** über eine ganze Textzeile (echter
+  Multiply-Blend, damit der Text darunter lesbar bleibt) – jederzeit umschaltbar
+- **Freihändig zeichnen** – ein **Stift** mit frei wählbarer **Farbe**, **Stärke**
   (bis 24 pt), **Deckkraft** und **Linienstil** (durchgezogen · gestrichelt · gepunktet),
   mit **Live-Vorschau** des Strichs. Jede Eigenschaft lässt sich später am ausgewählten
   Strich weiter anpassen

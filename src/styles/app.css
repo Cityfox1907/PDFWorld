@@ -89,6 +89,65 @@
   font-size: 13px;
   color: var(--text-3);
 }
+/* "or" divider between the upload dropzone and the blank-page action. */
+.home-or {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 16px 4px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.home-or::before,
+.home-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+/* Secondary "open a blank page" action on the start screen. */
+.home-blank {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.2s, background 0.2s, transform 0.15s var(--ease);
+  box-shadow: var(--shadow-sm);
+}
+.home-blank:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+.home-blank:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.home-blank svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.home-blank span {
+  display: flex;
+  flex-direction: column;
+}
+.home-blank-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.home-blank-sub {
+  font-size: 12.5px;
+  color: var(--text-3);
+  margin-top: 1px;
+}
 .home-error {
   margin-top: 16px;
   color: var(--danger);
@@ -635,6 +694,11 @@
   width: 100%;
   height: 100%;
   display: block;
+}
+/* A thick / round-capped stroke can extend slightly past its bounds box; let it show
+   instead of being clipped, so growing the pen width never cuts the line off. */
+.ink-body {
+  overflow: visible;
 }
 .img-body {
   object-fit: contain;
@@ -1644,6 +1708,15 @@ svg.draft {
   z-index: 6;
 }
 
+/* Rubber-band marquee drawn with the select tool to pick several elements at once. */
+.marquee {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: var(--accent-tint);
+  pointer-events: none;
+  z-index: 6;
+}
+
 .font-panel {
   position: absolute;
   z-index: 20;
@@ -1763,7 +1836,7 @@ svg.draft {
   text-align: center;
 }
 
-/* ── IMAGE EDITOR (crop + background removal) ── */
+/* ── IMAGE EDITOR (crop) ── */
 .imgedit-modal {
   width: auto;
   max-width: min(960px, calc(100vw - 32px));
@@ -1777,28 +1850,10 @@ svg.draft {
   border: 1px solid var(--line);
   touch-action: none;
 }
-.imgedit-img,
-.imgedit-canvas {
+.imgedit-img {
   display: block;
   user-select: none;
   -webkit-user-drag: none;
-}
-/* Transparent-aware checkerboard behind the background-removal preview. */
-.checker {
-  background-image:
-    linear-gradient(45deg, #c9c9cf 25%, transparent 25%, transparent 75%, #c9c9cf 75%),
-    linear-gradient(45deg, #c9c9cf 25%, transparent 25%, transparent 75%, #c9c9cf 75%);
-  background-size: 18px 18px;
-  background-position: 0 0, 9px 9px;
-  background-color: #fff;
-}
-.imgedit-loading {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--text-2);
-  font-size: 13px;
 }
 .crop-box {
   position: absolute;
@@ -1823,50 +1878,3 @@ svg.draft {
 .crop-handle.s { left: calc(50% - 6px); bottom: -6px; cursor: ns-resize; }
 .crop-handle.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
 .crop-handle.w { left: -6px; top: calc(50% - 6px); cursor: ew-resize; }
-.imgedit-bg {
-  display: flex;
-  gap: 18px;
-  align-items: flex-start;
-}
-.imgedit-tools {
-  width: 248px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 2px;
-}
-.imgedit-tools .divider {
-  margin: 4px 0;
-}
-.imgedit-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.imgedit-field label {
-  font-size: 12px;
-  color: var(--text-2);
-  min-width: 56px;
-}
-.imgedit-field input[type='range'] {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
-}
-.imgedit-tool-row {
-  display: flex;
-  gap: 8px;
-}
-.imgedit-tool-row .btn {
-  flex: 1;
-}
-@media (max-width: 720px) {
-  .imgedit-bg {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .imgedit-tools {
-    width: 100%;
-  }
-}

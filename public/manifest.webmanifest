@@ -1,0 +1,20 @@
+{
+  "name": "PDFWorld — PDF Editor",
+  "short_name": "PDFWorld",
+  "description": "PDFs verlustfrei bearbeiten, Seiten verwalten und Formulare ausfüllen — alles lokal im Browser.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ebebed",
+  "theme_color": "#0a84ff",
+  "lang": "de",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

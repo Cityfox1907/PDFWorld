@@ -1,0 +1,612 @@
+/* ============================================================
+   PDFWorld — Mobile UI
+   A touch-first shell around the shared editor engine. EVERY rule
+   here is scoped under .m-app (or the sheets it renders), so the
+   desktop web app is never affected. Built on the same design
+   tokens (global.css) for a consistent, Apple-grade feel.
+   ============================================================ */
+
+.m-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+  /* Disable iOS text-size adjust + tap highlight for an app-like feel. */
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+.m-app button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* ── TOP BAR ── */
+.m-topbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 52px;
+  padding: 0 8px;
+  padding-top: env(safe-area-inset-top);
+  height: calc(52px + env(safe-area-inset-top));
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  z-index: 30;
+}
+.m-icon-btn {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--text);
+  transition: background 0.15s, opacity 0.15s, transform 0.1s var(--ease);
+}
+.m-icon-btn:active {
+  transform: scale(0.92);
+  background: var(--bg-elevated);
+}
+.m-icon-btn:disabled {
+  opacity: 0.32;
+}
+.m-file {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+}
+.m-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.m-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  margin-left: 4px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent-grad);
+  box-shadow: 0 4px 14px var(--accent-ring);
+  transition: transform 0.1s var(--ease), filter 0.15s;
+}
+.m-save:active {
+  transform: scale(0.96);
+}
+.m-save:disabled {
+  opacity: 0.6;
+}
+@media (max-width: 360px) {
+  .m-save span {
+    display: none;
+  }
+}
+
+/* ── CANVAS AREA ── */
+.m-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.m-app .canvas-area {
+  flex: 1;
+  /* one-finger pan / scroll; pinch-zoom handled in JS (PageCanvas) */
+  touch-action: pan-x pan-y;
+}
+.m-app .canvas-stage {
+  margin: 18px auto;
+}
+/* Dragging an element (or a resize handle) must move it, not scroll the page. */
+.m-app .el,
+.m-app .handle {
+  touch-action: none;
+}
+/* While a creation tool is active, drags on the page draw/place instead of scrolling. */
+.m-app .canvas-area.tool-draw .overlay,
+.m-app .canvas-area.tool-brush .overlay,
+.m-app .canvas-area.tool-highlight .overlay,
+.m-app .canvas-area.tool-cut .overlay,
+.m-app .canvas-area.tool-rect .overlay,
+.m-app .canvas-area.tool-ellipse .overlay,
+.m-app .canvas-area.tool-shape .overlay,
+.m-app .canvas-area.tool-redact .overlay,
+.m-app .canvas-area.tool-text .overlay,
+.m-app .canvas-area.tool-callout .overlay,
+.m-app .canvas-area.tool-edit-text .overlay {
+  touch-action: none;
+}
+/* Bigger, finger-friendly resize handles + an invisible margin that enlarges the hit
+   area without moving the visible dot. */
+.m-app .handle {
+  width: 14px;
+  height: 14px;
+}
+.m-app .handle::after {
+  content: '';
+  position: absolute;
+  inset: -14px;
+}
+.m-app .handle.nw,
+.m-app .handle.ne,
+.m-app .handle.sw,
+.m-app .handle.se {
+  /* nudge corner dots so the larger size stays centred on the corner */
+  margin: -2px;
+}
+.m-app .el-lock {
+  width: 30px;
+  height: 30px;
+  top: -15px;
+  right: -15px;
+}
+
+/* ── PAGE NAV (floating) ── */
+.m-pagenav {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-md);
+  z-index: 12;
+  user-select: none;
+}
+:root[data-theme='dark'] .m-pagenav {
+  background: rgba(22, 23, 28, 0.82);
+}
+.m-pagenav-btn {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text);
+}
+.m-pagenav-btn:active {
+  background: var(--bg-elevated);
+}
+.m-pagenav-btn:disabled {
+  opacity: 0.3;
+}
+.m-pagenav-label {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  padding: 0 8px;
+  min-width: 52px;
+  text-align: center;
+}
+
+/* ── CONTEXT BAR ── */
+.m-context {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  animation: m-rise 0.22s var(--ease);
+}
+@keyframes m-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.m-context-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+.m-context-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.m-ctx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 11px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  transition: transform 0.1s var(--ease), background 0.15s;
+}
+.m-ctx-btn:active {
+  transform: scale(0.96);
+}
+.m-ctx-btn.primary {
+  flex: 1;
+  color: #fff;
+  background: var(--accent-grad);
+  border-color: transparent;
+  box-shadow: 0 4px 14px var(--accent-ring);
+}
+.m-ctx-btn.wide {
+  width: 100%;
+}
+.m-ctx-btn.danger {
+  color: var(--danger);
+}
+
+/* ── TOOL DOCK ── */
+.m-dock {
+  flex-shrink: 0;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 20;
+}
+.m-dock-scroll {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.m-dock-scroll::-webkit-scrollbar {
+  display: none;
+}
+.m-tool {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 64px;
+  min-height: 58px;
+  padding: 8px 4px;
+  border-radius: 14px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 0.14s, color 0.14s, transform 0.1s var(--ease);
+}
+.m-tool span {
+  line-height: 1;
+  white-space: nowrap;
+}
+.m-tool:active {
+  transform: scale(0.92);
+}
+.m-tool.active {
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 4px 12px var(--accent-ring);
+}
+.m-dock-sep {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 1px;
+  height: 36px;
+  margin: 0 6px;
+  background: var(--line);
+}
+
+/* ── BOTTOM SHEET ──
+   Kept deliberately BELOW the shared popovers/modals so controls opened from inside a
+   sheet still appear on top: font picker (z 120), colour picker (z 130), the modal
+   backdrop (z 100, signature / save / crop) and the page organiser (z 150). The sheet
+   only needs to clear the mobile chrome (top bar z 30, dock z 20). */
+.m-sheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+.m-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.3s var(--ease);
+}
+.m-sheet-root.open .m-sheet-backdrop {
+  opacity: 1;
+}
+.m-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 72vh;
+  background: var(--panel);
+  border-radius: 22px 22px 0 0;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(100%);
+  transition: transform 0.34s var(--ease);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.m-sheet.tall {
+  max-height: 88vh;
+  height: 88vh;
+}
+.m-sheet-root.open .m-sheet {
+  transform: translateY(0);
+}
+.m-sheet-grip {
+  position: relative;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  height: 30px;
+  cursor: grab;
+  touch-action: none;
+}
+.m-grip-bar {
+  width: 40px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--text-3);
+  opacity: 0.5;
+}
+.m-sheet-x {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text-2);
+  background: var(--bg-elevated);
+}
+.m-sheet-x:active {
+  transform: translateY(-50%) scale(0.92);
+}
+.m-sheet-title {
+  flex-shrink: 0;
+  padding: 2px 20px 10px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+.m-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 16px 20px;
+}
+
+/* ── SHEET-HOSTED: shared Inspector ── */
+.m-app .m-sheet .inspector {
+  width: 100%;
+  height: auto;
+  border: none;
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+}
+/* The inspector's own sticky header is redundant inside a sheet but useful as a label —
+   keep it, just unstick it and let it scroll with the body. */
+.m-app .m-sheet .insp-head {
+  position: static;
+  padding-top: 0;
+}
+
+/* ── SHEET-HOSTED: shared layers panel ── */
+.m-app .m-sheet .layers {
+  width: 100%;
+  height: auto;
+  border: none;
+  background: transparent;
+}
+.m-app .m-sheet .layers-head {
+  display: none; /* the sheet provides the close affordance */
+}
+
+/* ── Touch-friendly controls for ANY reused desktop control inside a sheet ── */
+.m-app .m-sheet .field {
+  height: 42px;
+  font-size: 16px; /* >=16px stops iOS from auto-zooming on focus */
+}
+.m-app .m-sheet .field-sm {
+  height: 42px;
+}
+.m-app .m-sheet .btn {
+  height: 42px;
+  font-size: 14px;
+}
+.m-app .m-sheet .btn.icon {
+  width: 42px;
+}
+.m-app .m-sheet .seg {
+  min-height: 42px;
+}
+.m-app .m-sheet .seg-btn {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 13.5px;
+}
+.m-app .m-sheet .insp-row {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.m-app .m-sheet input[type='range'] {
+  height: 34px;
+}
+.m-app .m-sheet input[type='range']::-webkit-slider-thumb {
+  width: 26px;
+  height: 26px;
+}
+.m-app .m-sheet input[type='range']::-moz-range-thumb {
+  width: 26px;
+  height: 26px;
+}
+.m-app .m-sheet .swatch,
+.m-app .m-sheet .swatch-preview {
+  width: 38px;
+  height: 38px;
+}
+/* Colour / font picker triggers a touch larger. */
+.m-app .m-sheet .color-trigger,
+.m-app .m-sheet .font-trigger,
+.m-app .m-sheet .font-picker > button,
+.m-app .m-sheet .color-picker > button {
+  min-height: 42px;
+}
+/* The shape-kind grid is 8 columns on desktop — too tight for fingers. */
+.m-app .m-sheet .shape-kind-grid {
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+.m-app .m-sheet .shape-kind-btn {
+  height: 44px;
+}
+.m-app .m-sheet .insp-actions {
+  gap: 10px;
+}
+.m-app .m-sheet .insp-actions .btn {
+  flex: 1 1 calc(50% - 5px);
+}
+
+/* ── SHAPES SHEET ── */
+.m-shape-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.m-shape {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 8px;
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  transition: transform 0.1s var(--ease), background 0.15s;
+}
+.m-shape:active {
+  transform: scale(0.95);
+}
+.m-shape.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+/* ── MENU SHEET ── */
+.m-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.m-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 12px;
+  border-radius: 14px;
+  text-align: left;
+  color: var(--text);
+  transition: background 0.14s;
+}
+.m-menu-item:active {
+  background: var(--bg-elevated);
+}
+.m-menu-item.danger .m-menu-title {
+  color: var(--danger);
+}
+.m-menu-ic {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.m-menu-item.danger .m-menu-ic {
+  color: var(--danger);
+  background: rgba(255, 59, 48, 0.12);
+}
+.m-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.m-menu-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.m-menu-sub {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* ── REUSED MODALS / ORGANISER on small screens ── */
+.m-app .modal {
+  max-width: min(480px, calc(100vw - 24px));
+}
+.m-app .imgedit-modal,
+.m-app .modal.imgedit-modal {
+  max-width: calc(100vw - 16px);
+}
+/* Full-screen page organiser: tighter thumbnail grid + safe areas on a phone. */
+.m-app .organizer {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.m-app .organizer-head {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.m-app .organizer-grid {
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+}

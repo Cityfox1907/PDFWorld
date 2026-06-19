@@ -749,6 +749,15 @@
   resize: none;
   padding: 0;
   margin: 0;
+  /* Strip the native control styling. Without this, mobile Safari gives a <textarea> an
+     intrinsic inset + its own line metrics, so the typed text renders shifted DOWN from
+     the element's box — the "warped / displaced text" seen on iOS. Resetting the
+     appearance and box-sizing makes the editor sit pixel-for-pixel where the box (and the
+     baked export) draw the glyphs. */
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  vertical-align: top;
 }
 .handle {
   position: absolute;

@@ -1,5 +1,6 @@
 import './mobile.css';
 import { useEffect } from 'react';
+import { useStore, MAX_ZOOM, MIN_ZOOM } from '../state/store';
 import { useUI } from '../state/ui';
 import { useMobileUi } from './mobileUi';
 // Reused engine-level components — shared, unmodified, identical behaviour to desktop.
@@ -30,6 +31,7 @@ export function MobileWorkspace() {
   const sheet = useMobileUi((s) => s.sheet);
   const closeSheet = useMobileUi((s) => s.close);
   const setElementsPanel = useUI((s) => s.setElementsPanel);
+  const setZoomLimits = useStore((s) => s.setZoomLimits);
 
   // The layers overview is just one of the single-value mobile sheets, but the shared
   // ElementsPanel renders only when elementsPanelOpen is set (and that flag also lights up
@@ -37,6 +39,40 @@ export function MobileWorkspace() {
   useEffect(() => {
     setElementsPanel(sheet === 'layers');
   }, [sheet, setElementsPanel]);
+
+  // On a phone, "fit to screen" (zoom = 1) is the smallest sensible magnification — a
+  // page pinched any smaller is just a useless speck floating in grey. So clamp the
+  // lower bound to 1 here (restored to the desktop 25 % when this shell unmounts).
+  useEffect(() => {
+    setZoomLimits(1, MAX_ZOOM);
+    return () => setZoomLimits(MIN_ZOOM, MAX_ZOOM);
+  }, [setZoomLimits]);
+
+  // Kill the browser's OWN pinch / double-tap / gesture zoom so only the document
+  // magnifies (via the canvas's JS pinch), never the toolbar or tabs. iOS Safari fires
+  // gesture* events for native zoom; suppressing them — plus any 2-finger move that the
+  // canvas itself didn't already claim — keeps the app chrome rock-steady.
+  useEffect(() => {
+    const stop = (e: Event) => e.preventDefault();
+    const onTouchMove = (e: TouchEvent) => {
+      // The canvas runs its own pinch-zoom (and calls preventDefault there); everywhere
+      // else a second finger must not zoom the page.
+      if (e.touches.length > 1) {
+        const target = e.target as Element | null;
+        if (!target || !target.closest('.canvas-area')) e.preventDefault();
+      }
+    };
+    document.addEventListener('gesturestart', stop as EventListener);
+    document.addEventListener('gesturechange', stop as EventListener);
+    document.addEventListener('gestureend', stop as EventListener);
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      document.removeEventListener('gesturestart', stop as EventListener);
+      document.removeEventListener('gesturechange', stop as EventListener);
+      document.removeEventListener('gestureend', stop as EventListener);
+      document.removeEventListener('touchmove', onTouchMove);
+    };
+  }, []);
 
   return (
     <div className="m-app">

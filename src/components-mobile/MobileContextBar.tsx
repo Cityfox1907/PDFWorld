@@ -1,6 +1,6 @@
 import { useStore, type ToolId } from '../state/store';
 import { useMobileUi } from './mobileUi';
-import { SlidersHorizontal, Copy, Trash2, Layers } from 'lucide-react';
+import { SlidersHorizontal, Copy, Trash2, Layers, ScanText } from 'lucide-react';
 
 // Tools whose behaviour is shaped by options in the inspector (colour, size, mode …).
 const TOOLS_WITH_OPTIONS: Partial<Record<ToolId, string>> = {
@@ -65,6 +65,18 @@ export function MobileContextBar() {
             <Trash2 size={17} />
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // The scan tool has no options sheet — it works by tapping detected text on the page —
+  // so surface a clear hint instead, confirming the mode is live and how to use it.
+  if (activeTool === 'edit-text') {
+    return (
+      <div className="m-context">
+        <span className="m-context-label">
+          <ScanText size={16} /> Scan-Modus · Tippe auf einen Text
+        </span>
       </div>
     );
   }

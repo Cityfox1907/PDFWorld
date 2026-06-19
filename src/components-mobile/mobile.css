@@ -590,6 +590,42 @@
   color: var(--text-3);
 }
 
+/* ── SCAN TOOL on a phone ──
+   The detected-line boxes are tiny at fit scale, so enlarge their invisible tap target
+   (the visible tint stays put). The font-info panel is re-anchored to a full-width card
+   pinned just above the dock — !important beats the component's inline left/top/width so
+   it is always fully on-screen and finger-sized, instead of a 268-px popover hanging off
+   the edge of a small page. */
+.m-app .run-box {
+  touch-action: none;
+}
+.m-app .run-box::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+}
+.m-app .run-tag {
+  /* The point-size tag only shows on :hover (desktop). On touch there is no hover, so it
+     would never appear — keep it always visible and a touch larger for legibility. */
+  opacity: 1;
+}
+.m-app .font-panel {
+  position: fixed !important;
+  left: 12px !important;
+  right: 12px !important;
+  top: auto !important;
+  bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  width: auto !important;
+  max-width: none !important;
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+  z-index: 95;
+}
+.m-app .font-panel .btn {
+  min-height: 44px;
+  font-size: 14px;
+}
+
 /* ── REUSED MODALS / ORGANISER on small screens ── */
 .m-app .modal {
   max-width: min(480px, calc(100vw - 24px));

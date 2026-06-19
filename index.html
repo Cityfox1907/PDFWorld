@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- maximum-scale + user-scalable=no stop the browser from pinch-zooming its OWN
+         chrome and from auto-zooming when a small text field is focused. The document
+         itself still zooms — that is handled in JS on the canvas (PageCanvas), so only
+         the page magnifies, never the toolbar/tabs. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#f5f5f7" />
     <meta
       name="description"

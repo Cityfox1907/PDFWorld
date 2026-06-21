@@ -18,9 +18,16 @@ export function MobileTopBar() {
   const exporting = useStore((s) => s.exporting);
   const openSaveDialog = useUI((s) => s.openSaveDialog);
   const openSheet = useMobileUi((s) => s.open);
+  const askConfirm = useMobileUi((s) => s.askConfirm);
 
   const goHome = () => {
-    if (confirm('Zur Startseite zurück? Nicht gespeicherte Änderungen gehen verloren.')) void reset();
+    askConfirm({
+      title: 'Zur Startseite zurück?',
+      message: 'Nicht gespeicherte Änderungen gehen verloren.',
+      confirmLabel: 'Verwerfen',
+      danger: true,
+      onConfirm: () => void reset(),
+    });
   };
 
   return (

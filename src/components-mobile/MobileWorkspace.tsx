@@ -19,6 +19,7 @@ import { MobilePageNav } from './MobilePageNav';
 import { MobileSheet } from './MobileSheet';
 import { MobileMenu } from './MobileMenu';
 import { MobileShapesSheet } from './MobileShapesSheet';
+import { MobileConfirm } from './MobileConfirm';
 
 /**
  * The touch-first shell. It wraps the shared, unmodified PageCanvas (which is already
@@ -147,6 +148,9 @@ export function MobileWorkspace() {
       <ImageEditorModal />
       <SaveDialog />
       <PageOrganizer />
+
+      {/* App-native replacement for window.confirm (destructive actions). */}
+      <MobileConfirm />
     </div>
   );
 }

@@ -115,3 +115,25 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
 - **Richtung:** Wichtigster Mobile-Kern-Flow steht. Als Nächstes Politur:
   native `confirm()`-Dialoge durch app-eigene Bestätigung ersetzen.
 - **Nächster Loop:** `confirm()` → app-eigener Bestätigungs-Dialog (🟠 B).
+
+### 🔁 LOOP #5 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Re-DISCOVER):** Bestätigt 🟠 B — native `confirm()` in
+  `MobileTopBar.goHome` und `MobileMenu` (Neues Dokument). Blockierend, unstyled,
+  in manchen In-App-Browsern STILL unterdrückt → destruktive Aktion (reset) liefe
+  ohne Nachfrage → Datenverlust. Verletzt DoD #5 (mobil benutzbar, App-Grade).
+- **Gewählt:** App-eigener Bestätigungs-Dialog (höchster verbleibender Mobile-Hebel
+  nach dem Kern-Flow; #3 iOS-Zoom ist größer/riskanter → später).
+- **Geändert (additiv, Desktop unberührt):**
+  - `mobileUi.ts`: `ConfirmRequest` + `confirm`/`askConfirm`/`resolveConfirm`.
+  - `MobileConfirm.tsx` (neu): zentrierter Dialog mit Backdrop, Fade/Scale-In,
+    Abbrechen/Bestätigen (danger-Variante).
+  - `mobile.css`: `.m-confirm-*` Styles auf den Design-Tokens.
+  - `MobileWorkspace.tsx`: `<MobileConfirm/>` eingehängt.
+  - `MobileTopBar.tsx` + `MobileMenu.tsx`: `confirm()` → `askConfirm({…})`.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Kein `confirm()/alert()` mehr in der Mobile-Shell.
+  Regression keine (Desktop nutzt diese Shell nie).
+- **Richtung:** Mobile-Politur sitzt. Verbleibend: 🟠 #3 (iOS-Zoom/Tastatur,
+  größer/riskanter) und 🟢 Seiten-Direktsprung (klein). Nähert sich Diminishing
+  Returns für reine UX — nächster Loop prüft #3 ernsthaft oder STOP.
+- **Nächster Loop:** iOS-Input-Zoom beim On-Canvas-Editieren prüfen (🟠 C).

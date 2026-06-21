@@ -137,3 +137,26 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
   größer/riskanter) und 🟢 Seiten-Direktsprung (klein). Nähert sich Diminishing
   Returns für reine UX — nächster Loop prüft #3 ernsthaft oder STOP.
 - **Nächster Loop:** iOS-Input-Zoom beim On-Canvas-Editieren prüfen (🟠 C).
+
+### 🔁 LOOP #6 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Re-DISCOVER):**
+  - 🟠 C (iOS-Input-Zoom): **bereits gelöst** — `index.html:12` setzt schon
+    `maximum-scale=1.0, user-scalable=no`. Kein Handlungsbedarf (kein Goldplating).
+  - 🟠 **NEU — Tastatur verdeckt das editierte Feld.** Mit `position:fixed`-Body
+    schrumpft iOS das Layout beim Öffnen der Tastatur NICHT; ein tief liegendes
+    Textfeld (z. B. das gerade per „Text bearbeiten" geöffnete) saß hinter der
+    Tastatur → halb-kaputter Kern-Flow aus Loop #4. Höchster verbleibender Hebel
+    (vollendet das Fundament von #4).
+- **Gewählt:** Tastatur-Verdeckung beheben — niedriges Risiko, da die heikle
+  Pan/Zoom-Logik unangetastet bleibt.
+- **Geändert:** `MobileWorkspace.tsx` — Effekt, der `.m-app` an `visualViewport.height`
+  pinnt, solange die Tastatur offen ist. Die Canvas-Area schrumpft → der vorhandene
+  PageCanvas-`ResizeObserver` (Z. 171) passt die Seite automatisch in den Bereich
+  ÜBER der Tastatur ein. Kein Eingriff in Canvas-Code; Desktop unberührt.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Regression keine (rein additiver Mobile-Effekt mit Cleanup).
+- **Richtung:** Mobile-Kern-Flow (Text bearbeiten) jetzt end-to-end nutzbar:
+  erreichbar (#4), bestätigt destruktive Aktionen sauber (#5), Feld bleibt sichtbar
+  (#6). Verbleibend nur noch 🟢 Kleinkram (Seiten-Direktsprung). → Diminishing
+  Returns für hebelstarke Mobile-UX erreicht.
+- **Nächster Loop:** Final-DISCOVER auf weitere hebelstarke Befunde; sonst STOP.

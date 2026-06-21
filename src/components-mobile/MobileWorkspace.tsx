@@ -1,5 +1,5 @@
 import './mobile.css';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useStore, MAX_ZOOM, MIN_ZOOM } from '../state/store';
 import { useUI } from '../state/ui';
 import { useMobileUi } from './mobileUi';
@@ -33,6 +33,7 @@ export function MobileWorkspace() {
   const closeSheet = useMobileUi((s) => s.close);
   const setElementsPanel = useUI((s) => s.setElementsPanel);
   const setZoomLimits = useStore((s) => s.setZoomLimits);
+  const appRef = useRef<HTMLDivElement>(null);
 
   // The layers overview is just one of the single-value mobile sheets, but the shared
   // ElementsPanel renders only when elementsPanelOpen is set (and that flag also lights up
@@ -115,8 +116,33 @@ export function MobileWorkspace() {
     };
   }, []);
 
+  // Keep the shell pinned to the VISIBLE viewport while the on-screen keyboard is open.
+  // With a position:fixed body, iOS does not shrink the layout when the keyboard appears,
+  // so a text field low on the page (e.g. one just opened via "Text bearbeiten") would
+  // sit hidden behind the keyboard. Shrinking .m-app to visualViewport.height makes the
+  // canvas-area resize, which the PageCanvas ResizeObserver already reacts to by re-
+  // fitting the page into the smaller area — so the whole document, and the field being
+  // edited, stay visible above the keyboard. Cleared the moment the keyboard closes.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const el = appRef.current;
+    if (!vv || !el) return;
+    const apply = () => {
+      const keyboardOpen = window.innerHeight - vv.height > 120;
+      el.style.height = keyboardOpen ? `${vv.height}px` : '';
+    };
+    apply();
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    return () => {
+      vv.removeEventListener('resize', apply);
+      vv.removeEventListener('scroll', apply);
+      el.style.height = '';
+    };
+  }, []);
+
   return (
-    <div className="m-app">
+    <div className="m-app" ref={appRef}>
       <MobileTopBar />
 
       <div className="m-canvas">

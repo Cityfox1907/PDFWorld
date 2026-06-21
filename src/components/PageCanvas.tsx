@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore, visibleSize, type EditorPage } from '../state/store';
 import { useUI } from '../state/ui';
 import { viewportBridge } from '../state/viewport';
@@ -100,6 +101,19 @@ export function PageCanvas() {
   const [fitScale, setFitScale] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AnyElement | null>(null);
+  // Background-brush magnifier loupe: the sampled point (view-points), where to float the
+  // loupe on screen (client px), the active sampling map and the exact colour under the
+  // cursor — so the preview shows precisely which pixel/colour the brush will pick up.
+  const [loupe, setLoupe] = useState<{
+    vx: number;
+    vy: number;
+    clientX: number;
+    clientY: number;
+    px: number;
+    ox: number;
+    oy: number;
+    color: string;
+  } | null>(null);
   // Rubber-band selection rectangle (view-points) drawn with the select tool.
   const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   // Touch two-tap selection: the first corner the user tapped (view-points). A drag-
@@ -707,6 +721,33 @@ export function PageCanvas() {
     return { px: scale * TARGET_DENSITY, ox: 0, oy: 0 };
   };
 
+  // ── background-brush loupe: a live, pixel-zoomed magnifier at the cursor ──
+  // Shows exactly which pixel — and which colour — the brush is about to pick up. It's fed
+  // from the overlay's pointer move, so it tracks the mouse on the web (on hover, before any
+  // click) and the finger on touch (while pressing). The colour read goes through the very
+  // same sampler the brush lays down (sampleColorAt + sampleMap), so the preview can never
+  // disagree with the result. Reads are coalesced to one per animation frame to stay smooth.
+  const loupeRaf = useRef(0);
+  const updateBrushLoupe = (e: { clientX: number; clientY: number }) => {
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    if (loupeRaf.current) return;
+    loupeRaf.current = requestAnimationFrame(() => {
+      loupeRaf.current = 0;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const v = evToView({ clientX, clientY });
+      const { px, ox, oy } = sampleMap();
+      const color = sampleColorAt(canvas, v.x, v.y, px, ox, oy);
+      setLoupe({ vx: v.x, vy: v.y, clientX, clientY, px, ox, oy, color });
+    });
+  };
+  useEffect(() => () => { if (loupeRaf.current) cancelAnimationFrame(loupeRaf.current); }, []);
+  // The loupe belongs to the brush only — drop it the moment another tool takes over.
+  useEffect(() => {
+    if (activeTool !== 'brush') setLoupe(null);
+  }, [activeTool]);
+
   // ── creating elements by dragging / clicking ──
   const onOverlayPointerDown = (e: React.PointerEvent) => {
     if (!page) return;
@@ -834,7 +875,9 @@ export function PageCanvas() {
     }
     if (activeTool === 'brush') {
       // Background brush: a freehand stroke, or a borderless rectangle filled with the
-      // sampled page background (so a block can be cleared in one drag).
+      // sampled page background (so a block can be cleared in one drag). Light up the loupe
+      // on the very first contact so a touch user sees the picked pixel from the start.
+      updateBrushLoupe(e);
       if (tool.brushMode === 'rect') startBgRect(start, e);
       else startBrush(start, e);
       return;
@@ -1603,6 +1646,12 @@ export function PageCanvas() {
           className={`overlay ${elementsPanelOpen ? 'reveal' : ''}`}
           style={{ width: view.width * scale, height: view.height * scale }}
           onPointerDown={onOverlayPointerDown}
+          // The brush loupe tracks the pointer here: hover on the web (pointer capture keeps
+          // it alive during a stroke too), press-and-drag on touch. Leaving the page or
+          // lifting a finger dismisses it.
+          onPointerMove={activeTool === 'brush' ? updateBrushLoupe : undefined}
+          onPointerLeave={loupe ? () => setLoupe(null) : undefined}
+          onPointerUp={loupe ? (e) => { if (e.pointerType === 'touch') setLoupe(null); } : undefined}
         >
           {sorted.map((el) => (
             <ElementView
@@ -1671,7 +1720,108 @@ export function PageCanvas() {
           />
         )}
       </div>
+
+      {/* Background-brush magnifier: a pixel-zoomed view of the spot under the cursor with
+          the exact colour that will be picked up. Rendered through a body portal so it
+          floats above everything (and is never clipped by the stage) on web and mobile. */}
+      {activeTool === 'brush' && loupe && (
+        <BrushLoupe
+          canvasRef={canvasRef}
+          map={{ px: loupe.px, ox: loupe.ox, oy: loupe.oy }}
+          vx={loupe.vx}
+          vy={loupe.vy}
+          clientX={loupe.clientX}
+          clientY={loupe.clientY}
+          color={loupe.color}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Magnifier loupe for the background brush. It blits a tiny square of the rendered page
+ * bitmap — centred on the pixel the brush will sample — into a small round canvas at a
+ * heavy, nearest-neighbour zoom, marks the exact centre pixel, and prints the colour that
+ * will be laid down. It floats just off the cursor (web) or above the finger (touch) via a
+ * body portal, so it is never hidden behind the pointer and never clipped by the page.
+ */
+function BrushLoupe({
+  canvasRef,
+  map,
+  vx,
+  vy,
+  clientX,
+  clientY,
+  color,
+}: {
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
+  map: { px: number; ox: number; oy: number };
+  vx: number;
+  vy: number;
+  clientX: number;
+  clientY: number;
+  color: string;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const SIZE = 132; // on-screen diameter (CSS px)
+  const SRC = 15; // source bitmap pixels across — odd, so there is a true centre pixel
+
+  useLayoutEffect(() => {
+    const lc = ref.current;
+    if (!lc) return;
+    const ctx = lc.getContext('2d');
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    if (lc.width !== Math.round(SIZE * dpr)) {
+      lc.width = Math.round(SIZE * dpr);
+      lc.height = Math.round(SIZE * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false; // crisp pixel grid, not a blur
+    // Neutral backdrop so the few pixels past the rendered window still read cleanly.
+    ctx.fillStyle = '#f2f2f3';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    const canvas = canvasRef.current;
+    if (canvas) {
+      // The exact bitmap pixel the brush samples (same maths as sampleColorAt).
+      const cx = Math.round(vx * map.px - map.ox);
+      const cy = Math.round(vy * map.px - map.oy);
+      const half = (SRC - 1) / 2;
+      try {
+        ctx.drawImage(canvas, cx - half, cy - half, SRC, SRC, 0, 0, SIZE, SIZE);
+      } catch {
+        /* tainted / out of range — keep the backdrop */
+      }
+    }
+    // Outline the centre pixel (white under, dark over) so it reads on any background.
+    const cell = SIZE / SRC;
+    const o = ((SRC - 1) / 2) * cell;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.strokeRect(o - 1, o - 1, cell + 2, cell + 2);
+    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    ctx.strokeRect(o, o, cell, cell);
+  }, [canvasRef, map.px, map.ox, map.oy, vx, vy]);
+
+  // Float just off the cursor; flip below when there isn't room above (top edge / touch).
+  // The stack is the canvas plus the hex chip plus the gap, so reserve a touch more than
+  // SIZE before deciding the loupe would clip off the top.
+  const OFFSET = 28;
+  const below = clientY < SIZE + 70;
+  const style: React.CSSProperties = {
+    left: clientX,
+    top: clientY,
+    transform: `translate(-50%, ${below ? `${OFFSET}px` : `calc(-100% - ${OFFSET}px)`})`,
+  };
+  return createPortal(
+    <div className="brush-loupe" style={style} aria-hidden>
+      <canvas ref={ref} className="brush-loupe-canvas" style={{ width: SIZE, height: SIZE }} />
+      <span className="brush-loupe-hex" style={{ background: color }}>
+        {color.toUpperCase()}
+      </span>
+    </div>,
+    document.body,
   );
 }
 

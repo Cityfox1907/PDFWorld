@@ -350,10 +350,14 @@ export function PageCanvas() {
     }
     let cancelled = false;
     void (async () => {
+      // Which phase is running, so a failure points to the exact culprit in the toast.
+      let phase = 'getPage';
       try {
         const pdfPage = await engine.getPage(pageSourceKey, pageSourceIndex);
+        phase = 'extractText';
         const r = await extractTextRuns(pdfPage, rotation);
         if (cancelled) return;
+        phase = 'group';
         const lines = groupRunsIntoLines(r);
         setRuns(lines); // show the clickable boxes immediately
         if (lines.length === 0) showToast('Kein bearbeitbarer Text auf dieser Seite gefunden.', 'info');
@@ -421,7 +425,10 @@ export function PageCanvas() {
         if (!cancelled) {
           setRuns([]);
           console.error('Textscan fehlgeschlagen:', err);
-          showToast('Text konnte nicht gescannt werden. Bitte erneut versuchen.', 'error');
+          // Keep this verbose until the user confirms scanning works: it names the failing
+          // phase AND the full error, so the exact cause is unambiguous from a screenshot.
+          const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+          showToast(`Scan-Fehler [${phase}] — ${msg}`, 'error');
         }
       }
     })();

@@ -161,10 +161,18 @@ export function pageViewSize(page: PDFPageProxy, rotation: number): { width: num
  */
 export async function extractTextRuns(page: PDFPageProxy, rotation: number): Promise<TextRun[]> {
   const viewport = page.getViewport({ scale: 1, rotation });
-  const content = await page.getTextContent();
+  let content: Awaited<ReturnType<PDFPageProxy['getTextContent']>>;
+  try {
+    content = await page.getTextContent();
+  } catch (e) {
+    // Label WHERE it failed so the scan diagnostic can pinpoint the cause precisely.
+    throw new Error(`getTextContent: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`, { cause: e });
+  }
   const runs: TextRun[] = [];
 
-  for (const item of content.items) {
+  // Defensive: never let a malformed / non-iterable items array crash the whole scan.
+  const items = Array.isArray(content?.items) ? content.items : [];
+  for (const item of items) {
     if (!('str' in item)) continue;
     const str = item.str;
     if (!str || !str.trim()) continue;

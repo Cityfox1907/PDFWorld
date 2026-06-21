@@ -116,6 +116,10 @@ interface StoreState {
   selectedElementId: string | null;
   /** every selected element id — a marquee or shift-click can select several at once */
   selectedElementIds: string[];
+  /** A one-shot request (raised by the touch chrome, where there is no double-click) to
+   *  begin inline text editing of an element. PageCanvas owns the real editing state and
+   *  consumes this; the nonce lets the same element be re-requested. Not part of history. */
+  editRequest: { id: string; n: number } | null;
   activeTool: ToolId;
   zoom: number;
   /** Active magnification clamp. Defaults to the module constants; the mobile shell
@@ -162,6 +166,8 @@ interface StoreState {
   selectElement: (id: string | null) => void;
   /** Replace the whole selection set (marquee / programmatic multi-select). */
   selectElements: (ids: string[]) => void;
+  /** Ask PageCanvas to begin inline editing of a text/callout element (touch path). */
+  requestTextEdit: (id: string) => void;
   /** Add or remove one element from the current selection (shift-click). */
   toggleElementSelection: (id: string) => void;
   setToolDefaults: (patch: Partial<ToolDefaults>) => void;
@@ -272,6 +278,7 @@ export const useStore = create<StoreState>((set, get) => ({
   currentPageId: null,
   selectedElementId: null,
   selectedElementIds: [],
+  editRequest: null,
   activeTool: 'select',
   zoom: 1,
   minZoom: MIN_ZOOM,
@@ -464,6 +471,9 @@ export const useStore = create<StoreState>((set, get) => ({
   selectElements(ids) {
     const unique = [...new Set(ids)];
     set({ selectedElementIds: unique, selectedElementId: unique.length ? unique[unique.length - 1] : null });
+  },
+  requestTextEdit(id) {
+    set((s) => ({ editRequest: { id, n: (s.editRequest?.n ?? 0) + 1 } }));
   },
   toggleElementSelection(id) {
     set((s) => {

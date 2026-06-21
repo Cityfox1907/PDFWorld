@@ -86,3 +86,95 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
   noch kleine 🟠/🟡 (z. B. Objekt-URL-Lebenszyklus) — abnehmender Grenznutzen.
 - **Nächster Loop:** Prüfen, ob noch ein hebelstarker Befund existiert; sonst
   STOP (Diminishing Returns / DoD-Kernziele erreicht).
+
+### 🔁 LOOP #4 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Mobile-DISCOVER, alle Mobile-Dateien + geteilte Kernkomponenten
+  gelesen):** 🔴1 🟠2 🟢1
+  - 🔴 **Text bearbeiten auf Touch unerreichbar.** Den Inhalt eines bestehenden
+    Text-/Callout-Elements ändert man NUR per `onDoubleClick` (`ElementView.tsx:254`)
+    — auf dem Handy unentdeckbar/unzuverlässig. `MobileContextBar` bot nur
+    Eigenschaften/Duplizieren/Löschen, und `Inspector`/`TextProps` hat KEIN
+    Inhalts-Feld (nur Schrift/Größe/Farbe). → häufigster Vorgang (Tippfehler
+    korrigieren) faktisch unmöglich. Verletzt DoD #1 + #5. *Höchster Hebel.*
+  - 🟠 Native `confirm()` in MobileTopBar/MobileMenu (blockierend, hässlich). → offen
+  - 🟠 iOS-Auto-Zoom/Tastatur beim On-Canvas-Editieren. → offen
+  - 🟢 Direktsprung zu Seite fehlt (PageNav nur prev/next). → offen
+- **Gewählt:** First-class Touch-Texteditierung (🔴, höchster Hebel) — Kern-Flow
+  reparieren statt polieren (Fundament vor Fassade).
+- **Geändert (chirurgisch, additiv, Desktop unberührt):**
+  - `src/state/store.ts`: generisches `editRequest`-Signal (`{id,n}` Nonce) +
+    Action `requestTextEdit(id)` (nicht Teil der History).
+  - `src/components/PageCanvas.tsx`: konsumiert `editRequest` in einem nonce-
+    gewachten Effekt → select-Tool, selektieren, `startEditElement`. Letzteres in
+    `useCallback` stabilisiert (Lint).
+  - `src/components-mobile/MobileContextBar.tsx`: „Text bearbeiten"-Primärbutton
+    bei selektiertem (unlocked) Text/Callout, Eigenschaften daneben.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Regression keine (Desktop-Doppelklick-Pfad unverändert,
+  neuer Pfad nur additiv). DoD #1 + #5 vorangebracht.
+- **Richtung:** Wichtigster Mobile-Kern-Flow steht. Als Nächstes Politur:
+  native `confirm()`-Dialoge durch app-eigene Bestätigung ersetzen.
+- **Nächster Loop:** `confirm()` → app-eigener Bestätigungs-Dialog (🟠 B).
+
+### 🔁 LOOP #5 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Re-DISCOVER):** Bestätigt 🟠 B — native `confirm()` in
+  `MobileTopBar.goHome` und `MobileMenu` (Neues Dokument). Blockierend, unstyled,
+  in manchen In-App-Browsern STILL unterdrückt → destruktive Aktion (reset) liefe
+  ohne Nachfrage → Datenverlust. Verletzt DoD #5 (mobil benutzbar, App-Grade).
+- **Gewählt:** App-eigener Bestätigungs-Dialog (höchster verbleibender Mobile-Hebel
+  nach dem Kern-Flow; #3 iOS-Zoom ist größer/riskanter → später).
+- **Geändert (additiv, Desktop unberührt):**
+  - `mobileUi.ts`: `ConfirmRequest` + `confirm`/`askConfirm`/`resolveConfirm`.
+  - `MobileConfirm.tsx` (neu): zentrierter Dialog mit Backdrop, Fade/Scale-In,
+    Abbrechen/Bestätigen (danger-Variante).
+  - `mobile.css`: `.m-confirm-*` Styles auf den Design-Tokens.
+  - `MobileWorkspace.tsx`: `<MobileConfirm/>` eingehängt.
+  - `MobileTopBar.tsx` + `MobileMenu.tsx`: `confirm()` → `askConfirm({…})`.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Kein `confirm()/alert()` mehr in der Mobile-Shell.
+  Regression keine (Desktop nutzt diese Shell nie).
+- **Richtung:** Mobile-Politur sitzt. Verbleibend: 🟠 #3 (iOS-Zoom/Tastatur,
+  größer/riskanter) und 🟢 Seiten-Direktsprung (klein). Nähert sich Diminishing
+  Returns für reine UX — nächster Loop prüft #3 ernsthaft oder STOP.
+- **Nächster Loop:** iOS-Input-Zoom beim On-Canvas-Editieren prüfen (🟠 C).
+
+### 🔁 LOOP #6 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Re-DISCOVER):**
+  - 🟠 C (iOS-Input-Zoom): **bereits gelöst** — `index.html:12` setzt schon
+    `maximum-scale=1.0, user-scalable=no`. Kein Handlungsbedarf (kein Goldplating).
+  - 🟠 **NEU — Tastatur verdeckt das editierte Feld.** Mit `position:fixed`-Body
+    schrumpft iOS das Layout beim Öffnen der Tastatur NICHT; ein tief liegendes
+    Textfeld (z. B. das gerade per „Text bearbeiten" geöffnete) saß hinter der
+    Tastatur → halb-kaputter Kern-Flow aus Loop #4. Höchster verbleibender Hebel
+    (vollendet das Fundament von #4).
+- **Gewählt:** Tastatur-Verdeckung beheben — niedriges Risiko, da die heikle
+  Pan/Zoom-Logik unangetastet bleibt.
+- **Geändert:** `MobileWorkspace.tsx` — Effekt, der `.m-app` an `visualViewport.height`
+  pinnt, solange die Tastatur offen ist. Die Canvas-Area schrumpft → der vorhandene
+  PageCanvas-`ResizeObserver` (Z. 171) passt die Seite automatisch in den Bereich
+  ÜBER der Tastatur ein. Kein Eingriff in Canvas-Code; Desktop unberührt.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Regression keine (rein additiver Mobile-Effekt mit Cleanup).
+- **Richtung:** Mobile-Kern-Flow (Text bearbeiten) jetzt end-to-end nutzbar:
+  erreichbar (#4), bestätigt destruktive Aktionen sauber (#5), Feld bleibt sichtbar
+  (#6). Verbleibend nur noch 🟢 Kleinkram (Seiten-Direktsprung). → Diminishing
+  Returns für hebelstarke Mobile-UX erreicht.
+- **Nächster Loop:** Final-DISCOVER auf weitere hebelstarke Befunde; sonst STOP.
+
+### 🔁 LOOP #7 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Re-DISCOVER):**
+  - Undo/Redo: **bereits vorhanden** (MobileTopBar) — kein Handlungsbedarf.
+  - 🟢→🟠 **Seiten-Navigation auf langen PDFs zäh.** `MobilePageNav` bot nur
+    prev/next-Stepper; der Zähler `x / y` war ein toter `span`. Auf einem 50-Seiten-
+    Dokument ist Schritt-für-Schritt mühsam. Der Seiten-Organizer (Thumbnail-Grid)
+    existiert und navigiert bereits per Tap (`PageOrganizer.tsx:229 setCurrentPage`),
+    war aber nur tief im Menü erreichbar.
+- **Gewählt:** Zähler antippbar machen → Organizer öffnen. Hoher Reuse, minimales
+  Risiko (keine neue Logik, nur ein Einstiegspunkt zu vorhandener Funktion).
+- **Geändert:** `MobilePageNav.tsx` — `span` → `<button>` öffnet `setOrganizer(true)`;
+  `mobile.css` — Button-Reset + Tap-Affordanz für `.m-pagenav-label`.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Regression keine (rein additiver Einstiegspunkt).
+- **Richtung:** Mobile-UX rund — Kern-Editier-Flow + Seiten-Navigation + Dialoge
+  alle app-grade. **STOP: Diminishing Returns** (keine hebelstarken Befunde mehr;
+  weitere Arbeit wäre Fassaden-Politur). Merge nach `main` auf Nutzer-Anweisung.

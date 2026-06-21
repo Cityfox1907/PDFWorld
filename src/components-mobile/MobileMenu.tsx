@@ -24,6 +24,7 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
   const reset = useStore((s) => s.reset);
   const setOrganizer = useUI((s) => s.setOrganizer);
   const openSheet = useMobileUi((s) => s.open);
+  const askConfirm = useMobileUi((s) => s.askConfirm);
   const theme = useUI((s) => s.theme);
   const toggleTheme = useUI((s) => s.toggleTheme);
   const mergeRef = useRef<HTMLInputElement>(null);
@@ -64,11 +65,16 @@ export function MobileMenu({ open, onClose }: { open: boolean; onClose: () => vo
           title="Neues Dokument"
           sub="Aktuelles schließen"
           danger
-          onClick={() =>
-            run(() => {
-              if (confirm('Aktuelles Dokument schliessen? Nicht gespeicherte Änderungen gehen verloren.')) void reset();
-            })
-          }
+          onClick={() => {
+            onClose();
+            askConfirm({
+              title: 'Neues Dokument?',
+              message: 'Das aktuelle Dokument wird geschlossen. Nicht gespeicherte Änderungen gehen verloren.',
+              confirmLabel: 'Schließen',
+              danger: true,
+              onConfirm: () => void reset(),
+            });
+          }}
         />
       </div>
 

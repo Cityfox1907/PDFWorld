@@ -8,11 +8,28 @@ import { create } from 'zustand';
  */
 export type MobileSheet = 'none' | 'props' | 'shapes' | 'menu' | 'layers';
 
+/** A pending confirmation prompt — the app-native replacement for the browser's blocking,
+ *  unstyled (and in some in-app browsers silently suppressed) window.confirm(). */
+export interface ConfirmRequest {
+  title: string;
+  message?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  /** Tint the confirm button as destructive (red). */
+  danger?: boolean;
+  onConfirm: () => void;
+}
+
 interface MobileUiState {
   sheet: MobileSheet;
   open: (sheet: MobileSheet) => void;
   close: () => void;
   toggle: (sheet: MobileSheet) => void;
+  confirm: ConfirmRequest | null;
+  /** Show a confirmation prompt; onConfirm runs only if the user accepts. */
+  askConfirm: (req: ConfirmRequest) => void;
+  /** Resolve the open prompt — runs onConfirm when accepted, then clears it. */
+  resolveConfirm: (accepted: boolean) => void;
 }
 
 export const useMobileUi = create<MobileUiState>((set, get) => ({
@@ -20,4 +37,11 @@ export const useMobileUi = create<MobileUiState>((set, get) => ({
   open: (sheet) => set({ sheet }),
   close: () => set({ sheet: 'none' }),
   toggle: (sheet) => set({ sheet: get().sheet === sheet ? 'none' : sheet }),
+  confirm: null,
+  askConfirm: (req) => set({ confirm: req }),
+  resolveConfirm: (accepted) => {
+    const req = get().confirm;
+    set({ confirm: null });
+    if (accepted) req?.onConfirm();
+  },
 }));

@@ -255,9 +255,18 @@ body.m-locked {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
-  padding: 0 8px;
+  padding: 6px 8px;
   min-width: 52px;
   text-align: center;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.1s var(--ease), background 0.15s;
+}
+.m-pagenav-label:active {
+  transform: scale(0.94);
+  background: var(--bg-elevated);
 }
 
 /* ── CONTEXT BAR ── */
@@ -693,6 +702,86 @@ body.m-locked {
 .m-app .font-panel .btn {
   min-height: 44px;
   font-size: 14px;
+}
+
+/* ── APP-NATIVE CONFIRM DIALOG ──
+   Replaces window.confirm. Sits above the sheets (z 90) but below the pickers/modals
+   that can open from within them, so it never traps a control behind it. */
+.m-confirm-root {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.m-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+.m-confirm-root.open .m-confirm-backdrop {
+  opacity: 1;
+}
+.m-confirm {
+  position: relative;
+  width: 100%;
+  max-width: 340px;
+  padding: 22px 20px 16px;
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+  transform: scale(0.92);
+  opacity: 0;
+  transition: transform 0.2s var(--ease), opacity 0.2s var(--ease);
+}
+.m-confirm-root.open .m-confirm {
+  transform: scale(1);
+  opacity: 1;
+}
+.m-confirm-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.2px;
+}
+.m-confirm-msg {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.m-confirm-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.m-confirm-btn {
+  flex: 1;
+  height: 46px;
+  border-radius: 13px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  transition: transform 0.1s var(--ease), filter 0.15s;
+}
+.m-confirm-btn:active {
+  transform: scale(0.96);
+}
+.m-confirm-btn.primary {
+  color: #fff;
+  background: var(--accent-grad);
+  border-color: transparent;
+  box-shadow: 0 4px 14px var(--accent-ring);
+}
+.m-confirm-btn.primary.danger {
+  background: var(--danger);
+  box-shadow: 0 4px 14px rgba(255, 59, 48, 0.3);
 }
 
 /* ── REUSED MODALS / ORGANISER on small screens ── */

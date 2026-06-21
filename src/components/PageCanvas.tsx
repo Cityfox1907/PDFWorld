@@ -78,6 +78,8 @@ export function PageCanvas() {
   const showToast = useStore((s) => s.showToast);
   const pendingTextStyle = useStore((s) => s.pendingTextStyle);
   const setPendingTextStyle = useStore((s) => s.setPendingTextStyle);
+  // One-shot "edit this text" signal from the touch chrome (no double-click on a phone).
+  const editRequest = useStore((s) => s.editRequest);
   const elementsPanelOpen = useUI((s) => s.elementsPanelOpen);
 
   const areaRef = useRef<HTMLDivElement>(null);
@@ -121,6 +123,8 @@ export function PageCanvas() {
   // whose burst is in progress, and the timer that ends the burst after a pause.
   const nudgeActiveId = useRef<string | null>(null);
   const nudgeTimer = useRef<number | null>(null);
+  // Last edit-request nonce we already acted on, so the same signal fires editing once.
+  const editReqRef = useRef(0);
 
   const rotation = page ? (((page.baseRotation + page.addedRotation) % 360) + 360) % 360 : 0;
   const view = page ? visibleSize(page) : { width: 1, height: 1 };
@@ -1469,15 +1473,28 @@ export function PageCanvas() {
   };
 
   // ── starting / ending edits on overlay text elements ──
-  const startEditElement = (id: string) => {
+  const startEditElement = useCallback((id: string) => {
     commit(); // snapshot once before the edit so a single undo reverts the whole change
     setEditingId(id);
-  };
+  }, [commit]);
 
   // Leaving the textarea just exits edit mode — the box stays so the user can still
   // tweak font/size in the inspector before typing. An abandoned empty box is only
   // dropped when the user clicks an empty spot (see onOverlayPointerDown).
   const endTextEdit = () => setEditingId(null);
+
+  // On touch there is no double-click, so the mobile context bar raises an editRequest
+  // to begin editing the selected text/callout. Consume each nonce once: make the field
+  // interactive (select tool), select it, then drop into the inline editor.
+  useEffect(() => {
+    if (!editRequest || editRequest.n === editReqRef.current) return;
+    editReqRef.current = editRequest.n;
+    const el = page?.elements.find((e) => e.id === editRequest.id);
+    if (!el || (el.type !== 'text' && el.type !== 'callout') || el.locked) return;
+    if (activeTool !== 'select') setTool('select');
+    selectElement(editRequest.id);
+    startEditElement(editRequest.id);
+  }, [editRequest, page, activeTool, setTool, selectElement, startEditElement]);
 
   /** An empty, never-filled new text box or callout (not an in-place edit, which keeps
    *  its cover) — dropped when the user clicks away without typing anything. */

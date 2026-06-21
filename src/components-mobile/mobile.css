@@ -33,6 +33,18 @@ body.m-locked {
   touch-action: manipulation;
 }
 
+/* ── TOASTS ──
+   The shared Toast defaults to bottom-centre (fine on desktop). On the phone the bottom
+   edge is occupied by the context bar, tool dock and the floating page-nav, so a bottom
+   toast lands ON TOP of those controls and blocks them (e.g. a scan error covering the
+   toolbar). Float it just under the header instead — clear of every control, so a message
+   never overlaps or blocks anything the user needs to tap. */
+html:has(.m-app) .toast {
+  bottom: auto;
+  top: calc(52px + env(safe-area-inset-top) + 12px);
+  max-width: calc(100vw - 28px);
+}
+
 /* ── TOP BAR ── */
 .m-topbar {
   flex-shrink: 0;

@@ -368,7 +368,11 @@ export function PageCanvas() {
         // can be reused 1:1) and attach the ORIGINAL program when it does. The
         // readable name already comes from extractTextRuns; commonObjs is a fallback.
         // Always records `embedded` (even when nothing resolves) so the panel never
-        // stays stuck on the neutral "checking" badge.
+        // stays stuck on the neutral "checking" badge. A failure in THIS refinement
+        // (e.g. embedded-font extraction, which is the fragile step on mobile Safari)
+        // must never discard the clickable boxes the extraction above already produced
+        // — so it runs in its own try and, on error, simply keeps the basic boxes.
+        try {
         const infos = await inspectFonts(pdfPage, lines.map((l) => l.fontName));
         if (cancelled) return;
         const enriched = lines.map((l) => {
@@ -408,9 +412,15 @@ export function PageCanvas() {
           return { ...l, family, bold, italic, fontLabel, embedded, embeddedFontId };
         });
         if (!cancelled) setRuns(enriched);
-      } catch {
+        } catch (err) {
+          // Only the font refinement failed; the basic boxes from the extraction stay
+          // on screen so the scan tool still works. Log the real cause, never swallow it.
+          console.error('Scan-Schriftanalyse fehlgeschlagen – Basis-Boxen bleiben erhalten:', err);
+        }
+      } catch (err) {
         if (!cancelled) {
           setRuns([]);
+          console.error('Textscan fehlgeschlagen:', err);
           showToast('Text konnte nicht gescannt werden. Bitte erneut versuchen.', 'error');
         }
       }

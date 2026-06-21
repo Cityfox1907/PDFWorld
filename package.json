@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
-    "test:engine": "tsx scripts/test-engine.ts"
+    "test:engine": "tsx scripts/test-engine.ts",
+    "postinstall": "node scripts/patch-pdfjs.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

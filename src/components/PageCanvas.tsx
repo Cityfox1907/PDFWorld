@@ -421,7 +421,11 @@ export function PageCanvas() {
         if (!cancelled) {
           setRuns([]);
           console.error('Textscan fehlgeschlagen:', err);
-          showToast('Text konnte nicht gescannt werden. Bitte erneut versuchen.', 'error');
+          // Surface the real technical cause in the message itself: without access to the
+          // mobile console this is the only way to see WHY getTextContent/getPage failed,
+          // so the exact error can be pinpointed and fixed instead of guessed at.
+          const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+          showToast(`Scan-Fehler — ${detail}`, 'error');
         }
       }
     })();

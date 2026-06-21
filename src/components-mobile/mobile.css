@@ -255,9 +255,18 @@ body.m-locked {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
-  padding: 0 8px;
+  padding: 6px 8px;
   min-width: 52px;
   text-align: center;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.1s var(--ease), background 0.15s;
+}
+.m-pagenav-label:active {
+  transform: scale(0.94);
+  background: var(--bg-elevated);
 }
 
 /* ── CONTEXT BAR ── */

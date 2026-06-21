@@ -160,3 +160,21 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
   (#6). Verbleibend nur noch 🟢 Kleinkram (Seiten-Direktsprung). → Diminishing
   Returns für hebelstarke Mobile-UX erreicht.
 - **Nächster Loop:** Final-DISCOVER auf weitere hebelstarke Befunde; sonst STOP.
+
+### 🔁 LOOP #7 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Re-DISCOVER):**
+  - Undo/Redo: **bereits vorhanden** (MobileTopBar) — kein Handlungsbedarf.
+  - 🟢→🟠 **Seiten-Navigation auf langen PDFs zäh.** `MobilePageNav` bot nur
+    prev/next-Stepper; der Zähler `x / y` war ein toter `span`. Auf einem 50-Seiten-
+    Dokument ist Schritt-für-Schritt mühsam. Der Seiten-Organizer (Thumbnail-Grid)
+    existiert und navigiert bereits per Tap (`PageOrganizer.tsx:229 setCurrentPage`),
+    war aber nur tief im Menü erreichbar.
+- **Gewählt:** Zähler antippbar machen → Organizer öffnen. Hoher Reuse, minimales
+  Risiko (keine neue Logik, nur ein Einstiegspunkt zu vorhandener Funktion).
+- **Geändert:** `MobilePageNav.tsx` — `span` → `<button>` öffnet `setOrganizer(true)`;
+  `mobile.css` — Button-Reset + Tap-Affordanz für `.m-pagenav-label`.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Regression keine (rein additiver Einstiegspunkt).
+- **Richtung:** Mobile-UX rund — Kern-Editier-Flow + Seiten-Navigation + Dialoge
+  alle app-grade. **STOP: Diminishing Returns** (keine hebelstarken Befunde mehr;
+  weitere Arbeit wäre Fassaden-Politur). Merge nach `main` auf Nutzer-Anweisung.

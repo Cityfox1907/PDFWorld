@@ -50,5 +50,24 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
   (87/87 Engine-Tests grün), DoD #2 vorangebracht.
 - **Richtung:** Fundament stabilisieren, dann Robustheit der Ladepfade
   (Limits + saubere Fehler-Wiederherstellung), danach UX-Politur.
-- **Nächster Loop:** Datei-Lade-Robustheit (Grössen-/Seiten-Guard +
-  Engine-Cleanup bei Fehler) ODER undo/redo-Mehrfachauswahl.
+- **Nächster Loop:** Datei-Lade-Robustheit (atomares Laden).
+
+### 🔁 LOOP #2 — autopilot
+- **Befunde (Re-DISCOVER):** Bestätigt: `PdfEngine.loadMain` rief `disposeAll()`
+  VOR dem Parsen der neuen Datei auf. Lädt man bei geöffnetem Dokument eine
+  korrupte/verschlüsselte Datei, wurde das offene Dokument zerstört, während
+  `pages` im Store noch darauf zeigte → Status fiel auf `'ready'` zurück, aber
+  die Engine war leer → Canvas-`getPage` wirft → kaputter Zustand. (`mergeFile`/
+  `addImport` war bereits sicher: setzt Quelle nur bei Erfolg.)
+- **Gewählt:** Atomares `loadMain` — neue Quelle ZUERST parsen, erst bei Erfolg
+  altes Dokument verwerfen & tauschen. Höchster verbleibender Hebel (DoD #2:
+  Robustheit, kein Datenverlust).
+- **Geändert:** `src/lib/pdf/document.ts` (`loadMain` Reihenfolge: parse → dispose
+  → swap).
+- **VERIFY:** ✅ — typecheck/lint/build ok, Regression keine (87/87 Engine-Tests).
+  Headless-Test von `loadMain` nicht möglich (render.ts zieht Browser-pdf.js +
+  Vite-`?url`-Worker; bewusst nicht gemockt → Tabu/chirurgisch). Korrektheit per
+  Reasoning + Gates.
+- **Richtung:** Fundament der Ladepfade nun robust. Als Nächstes Korrektheits-
+  Politur (undo/redo-Mehrfachauswahl) oder UX.
+- **Nächster Loop:** undo/redo bewahrt Mehrfachauswahl.

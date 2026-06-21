@@ -44,8 +44,11 @@ export class PdfEngine {
   }
 
   async loadMain(bytes: Uint8Array): Promise<LoadedSource> {
-    await this.disposeAll();
+    // Parse the new document FIRST, then swap. If the file is corrupt or
+    // encrypted, makeSource throws here and the previously open document is left
+    // completely intact — a failed load never destroys what the user had open.
     const src = await this.makeSource('main', bytes);
+    await this.disposeAll();
     this.sources.set('main', src);
     return { key: 'main', pageCount: src.pageCount };
   }

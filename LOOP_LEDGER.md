@@ -71,3 +71,18 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
 - **Richtung:** Fundament der Ladepfade nun robust. Als Nächstes Korrektheits-
   Politur (undo/redo-Mehrfachauswahl) oder UX.
 - **Nächster Loop:** undo/redo bewahrt Mehrfachauswahl.
+
+### 🔁 LOOP #3 — autopilot
+- **Befunde (Re-DISCOVER):** Bestätigt: `Snapshot` hielt nur `selectedElementId`.
+  undo/redo stellten Mehrfachauswahl (Shift-Klick / Marquee) auf ein einziges
+  Element zusammen → stiller Auswahl-Verlust. Verletzt DoD #1 (Flows fehlerfrei).
+- **Gewählt:** `Snapshot` um `selectedElementIds` erweitern; in `snapshot()`
+  erfassen und in undo/redo wiederherstellen (mit defensivem Fallback auf den
+  Einzel-Wert für Alt-Snapshots).
+- **Geändert:** `src/state/store.ts` (Snapshot-Interface, `snapshot()`,
+  `undo()`, `redo()`).
+- **VERIFY:** ✅ — typecheck/lint/build ok, Regression keine (87/87).
+- **Richtung:** Korrektheits-Fundament steht. Verbleibende Befunde sind nur
+  noch kleine 🟠/🟡 (z. B. Objekt-URL-Lebenszyklus) — abnehmender Grenznutzen.
+- **Nächster Loop:** Prüfen, ob noch ein hebelstarker Befund existiert; sonst
+  STOP (Diminishing Returns / DoD-Kernziele erreicht).

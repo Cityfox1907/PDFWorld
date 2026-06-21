@@ -424,11 +424,9 @@ export function PageCanvas() {
       } catch (err) {
         if (!cancelled) {
           setRuns([]);
-          console.error('Textscan fehlgeschlagen:', err);
-          // Keep this verbose until the user confirms scanning works: it names the failing
-          // phase AND the full error, so the exact cause is unambiguous from a screenshot.
-          const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-          showToast(`Scan-Fehler [${phase}] — ${msg}`, 'error');
+          // Phase + error kept in the console for diagnosis; the user sees a clean message.
+          console.error(`Textscan fehlgeschlagen [${phase}]:`, err);
+          showToast('Text konnte nicht gescannt werden. Bitte erneut versuchen.', 'error');
         }
       }
     })();

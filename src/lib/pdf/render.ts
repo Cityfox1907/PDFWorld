@@ -1,7 +1,12 @@
-import * as pdfjs from 'pdfjs-dist';
+// LEGACY build (not the default modern one): pdf.js's modern bundle calls bleeding-edge
+// JS APIs (Promise.try, Uint8Array.prototype.toHex, …) that older iOS Safari lacks, which
+// made getTextContent throw "undefined is not a function" — breaking the text-scan tool on
+// real devices even though rendering still worked. The legacy build transpiles/polyfills
+// those, so it runs on the browsers our users actually have. Worker must match the build.
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 // Vite resolves this to a hashed URL and serves the worker as a module.
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import type { TextRun } from './types';
 import { classifyFont, prettyFontName, BASELINE_RATIO } from './fonts';
 import { matchCatalogFontKey, fontDef } from './fontCatalog';

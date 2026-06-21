@@ -14,7 +14,7 @@
 // Idempotent and non-fatal: if a future pdfjs version no longer matches (e.g. after an
 // upgrade), it logs a notice and exits 0 rather than breaking the install — at which point
 // this script should be revisited (the upstream bug may have been fixed).
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, cpSync, mkdirSync } from 'node:fs';
 
 const targets = [
   {
@@ -50,3 +50,22 @@ for (const { file, anchor, guard } of targets) {
 
 if (patched) console.log(`[patch-pdfjs] applied Type3-glyph crash guard to ${patched} worker file(s).`);
 if (missing) console.warn('[patch-pdfjs] some targets were skipped — review scripts/patch-pdfjs.mjs after a pdfjs upgrade.');
+
+// Stage pdf.js standard fonts + CMaps into public/ so the app can hand pdf.js a
+// `standardFontDataUrl` / `cMapUrl`. PDFs that use the 14 non-embedded standard fonts
+// (Helvetica, Times, …) need this data; without it, font loading fails in the browser
+// worker and getTextContent throws — which is exactly what broke the scan tool. Copied
+// here (gitignored, regenerated on every install) instead of committing ~185 binaries.
+const assetCopies = [
+  ['node_modules/pdfjs-dist/standard_fonts', 'public/pdfjs/standard_fonts'],
+  ['node_modules/pdfjs-dist/cmaps', 'public/pdfjs/cmaps'],
+];
+for (const [from, to] of assetCopies) {
+  if (!existsSync(from)) {
+    console.warn(`[patch-pdfjs] ${from} not found — skipping asset copy.`);
+    continue;
+  }
+  mkdirSync(to, { recursive: true });
+  cpSync(from, to, { recursive: true });
+}
+console.log('[patch-pdfjs] staged pdf.js standard fonts + CMaps into public/pdfjs/.');

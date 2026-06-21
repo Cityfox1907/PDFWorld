@@ -15,7 +15,21 @@ export async function loadPdfjs(data: Uint8Array): Promise<PDFDocumentProxy> {
   // pdf.js transfers/detaches the buffer, so hand it a private copy.
   // `fontExtraProperties` keeps each embedded font's program (`.data`) available
   // after binding, so the scan editor can reuse the *original* typeface 1:1.
-  const task = pdfjs.getDocument({ data: data.slice(), fontExtraProperties: true });
+  //
+  // In the browser, point pdf.js at the standard-font + CMap data staged under public/
+  // (see scripts/patch-pdfjs.mjs). PDFs that reference the 14 non-embedded standard fonts
+  // (Helvetica, Times, …) need this data; without it, font loading fails inside the worker
+  // and getTextContent throws — which is exactly what broke the text-scan tool. Skipped
+  // under Node (the engine tests), which has no such URL space and resolves fonts itself.
+  const inBrowser = typeof window !== 'undefined';
+  const fontData = inBrowser
+    ? {
+        standardFontDataUrl: `${import.meta.env.BASE_URL}pdfjs/standard_fonts/`,
+        cMapUrl: `${import.meta.env.BASE_URL}pdfjs/cmaps/`,
+        cMapPacked: true,
+      }
+    : {};
+  const task = pdfjs.getDocument({ data: data.slice(), fontExtraProperties: true, ...fontData });
   return task.promise;
 }
 

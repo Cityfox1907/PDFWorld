@@ -1,6 +1,6 @@
 import { useStore, type ToolId } from '../state/store';
 import { useMobileUi } from './mobileUi';
-import { SlidersHorizontal, Copy, Trash2, Layers, ScanText } from 'lucide-react';
+import { SlidersHorizontal, Copy, Trash2, Layers, ScanText, Pencil } from 'lucide-react';
 
 // Tools whose behaviour is shaped by options in the inspector (colour, size, mode …).
 const TOOLS_WITH_OPTIONS: Partial<Record<ToolId, string>> = {
@@ -26,12 +26,20 @@ export function MobileContextBar() {
   const selectedIds = useStore((s) => s.selectedElementIds);
   const currentPageId = useStore((s) => s.currentPageId);
   const activeTool = useStore((s) => s.activeTool);
+  const pages = useStore((s) => s.pages);
   const deleteElement = useStore((s) => s.deleteElement);
   const deleteElements = useStore((s) => s.deleteElements);
   const duplicateElement = useStore((s) => s.duplicateElement);
+  const requestTextEdit = useStore((s) => s.requestTextEdit);
   const openSheet = useMobileUi((s) => s.open);
 
   const openProps = () => openSheet('props');
+
+  // Is the single selected element an editable text/callout? On a phone there is no
+  // double-click, so this is the only way to reach its actual words.
+  const selectedEl = pages.find((p) => p.id === currentPageId)?.elements.find((e) => e.id === selectedId);
+  const isEditableText =
+    !!selectedEl && (selectedEl.type === 'text' || selectedEl.type === 'callout') && !selectedEl.locked;
 
   if (selectedIds.length > 1 && currentPageId) {
     return (
@@ -54,9 +62,22 @@ export function MobileContextBar() {
   if (selectedId && currentPageId) {
     return (
       <div className="m-context">
-        <button className="m-ctx-btn primary" onClick={openProps}>
-          <SlidersHorizontal size={17} /> Eigenschaften
-        </button>
+        {isEditableText ? (
+          // The words themselves are the point — make editing the primary, one-tap action,
+          // with the full property sheet a tap away beside it.
+          <>
+            <button className="m-ctx-btn primary" onClick={() => requestTextEdit(selectedId)}>
+              <Pencil size={17} /> Text bearbeiten
+            </button>
+            <button className="m-ctx-btn" onClick={openProps} aria-label="Eigenschaften">
+              <SlidersHorizontal size={17} />
+            </button>
+          </>
+        ) : (
+          <button className="m-ctx-btn primary" onClick={openProps}>
+            <SlidersHorizontal size={17} /> Eigenschaften
+          </button>
+        )}
         <div className="m-context-actions">
           <button className="m-ctx-btn" onClick={() => duplicateElement(currentPageId, selectedId)} aria-label="Duplizieren">
             <Copy size={17} />

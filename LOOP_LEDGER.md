@@ -86,3 +86,32 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
   noch kleine 🟠/🟡 (z. B. Objekt-URL-Lebenszyklus) — abnehmender Grenznutzen.
 - **Nächster Loop:** Prüfen, ob noch ein hebelstarker Befund existiert; sonst
   STOP (Diminishing Returns / DoD-Kernziele erreicht).
+
+### 🔁 LOOP #4 — autopilot (Fokus: Mobile-UX)
+- **Befunde (Mobile-DISCOVER, alle Mobile-Dateien + geteilte Kernkomponenten
+  gelesen):** 🔴1 🟠2 🟢1
+  - 🔴 **Text bearbeiten auf Touch unerreichbar.** Den Inhalt eines bestehenden
+    Text-/Callout-Elements ändert man NUR per `onDoubleClick` (`ElementView.tsx:254`)
+    — auf dem Handy unentdeckbar/unzuverlässig. `MobileContextBar` bot nur
+    Eigenschaften/Duplizieren/Löschen, und `Inspector`/`TextProps` hat KEIN
+    Inhalts-Feld (nur Schrift/Größe/Farbe). → häufigster Vorgang (Tippfehler
+    korrigieren) faktisch unmöglich. Verletzt DoD #1 + #5. *Höchster Hebel.*
+  - 🟠 Native `confirm()` in MobileTopBar/MobileMenu (blockierend, hässlich). → offen
+  - 🟠 iOS-Auto-Zoom/Tastatur beim On-Canvas-Editieren. → offen
+  - 🟢 Direktsprung zu Seite fehlt (PageNav nur prev/next). → offen
+- **Gewählt:** First-class Touch-Texteditierung (🔴, höchster Hebel) — Kern-Flow
+  reparieren statt polieren (Fundament vor Fassade).
+- **Geändert (chirurgisch, additiv, Desktop unberührt):**
+  - `src/state/store.ts`: generisches `editRequest`-Signal (`{id,n}` Nonce) +
+    Action `requestTextEdit(id)` (nicht Teil der History).
+  - `src/components/PageCanvas.tsx`: konsumiert `editRequest` in einem nonce-
+    gewachten Effekt → select-Tool, selektieren, `startEditElement`. Letzteres in
+    `useCallback` stabilisiert (Lint).
+  - `src/components-mobile/MobileContextBar.tsx`: „Text bearbeiten"-Primärbutton
+    bei selektiertem (unlocked) Text/Callout, Eigenschaften daneben.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Regression keine (Desktop-Doppelklick-Pfad unverändert,
+  neuer Pfad nur additiv). DoD #1 + #5 vorangebracht.
+- **Richtung:** Wichtigster Mobile-Kern-Flow steht. Als Nächstes Politur:
+  native `confirm()`-Dialoge durch app-eigene Bestätigung ersetzen.
+- **Nächster Loop:** `confirm()` → app-eigener Bestätigungs-Dialog (🟠 B).

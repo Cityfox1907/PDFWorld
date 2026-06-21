@@ -178,3 +178,27 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
 - **Richtung:** Mobile-UX rund — Kern-Editier-Flow + Seiten-Navigation + Dialoge
   alle app-grade. **STOP: Diminishing Returns** (keine hebelstarken Befunde mehr;
   weitere Arbeit wäre Fassaden-Politur). Merge nach `main` auf Nutzer-Anweisung.
+
+### 🔁 LOOP #8 — REGRESSION-FIX (Nutzer-gemeldet, Screenshot)
+- **Befund (🔴 von mir verursacht in #6):** Beim Hinzufügen/Editieren eines
+  Textfelds verschob sich die GANZE Mobile-Oberfläche nach oben; TopBar
+  verschwand, unter dem Dock klaffte eine große graue Lücke bis zur Tastatur.
+- **Ursache:** Mein Loop-#6-Effekt pinnte `.m-app` auf `visualViewport.height`.
+  Der Body ist bewusst `position:fixed; top:0` (MobileWorkspace Z. 53–57, genau
+  um das iOS-Hochscrollen zu verhindern). Das Schrumpfen von `.m-app` hebelte
+  diese Garantie aus: App oben verankert, sichtbarer Viewport bei Tastatur-Fokus
+  nach unten gepant → verschobene Chrome + graue Lücke. Klassischer Fall von
+  „Fix ohne Gerätetest verschlimmert das Problem".
+- **Behebung:** Loop #6 **vollständig zurückgenommen** (Effekt, `appRef`,
+  `useRef`-Import entfernt). Damit greift wieder die ursprüngliche, stabile
+  Fixed-Body-Logik — keine Verschiebung, keine graue Lücke.
+- **Audit (sorgfältig, statisch):** Layout ist eine saubere Flex-Spalte
+  (TopBar/Canvas/Context/Dock) → keine Überlappung im Normalzustand;
+  `.canvas-area { overflow:auto }` (app.css:624) schneidet Elemente am Seitenrand
+  ab → kein Ragen über die Toolbar. Loops #4/#5/#7 (Text-Button, Confirm-Dialog,
+  Seiten-Sprung) sind reines Flex/Overlay ohne Layout-Konflikt — bleiben bestehen.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ · build ✅.
+- **Lehre:** Keine viewport-/layout-verändernden Mobile-Hacks ohne echten
+  Gerätetest. Die Tastatur-Verdeckung (ursprüngliche #6-Motivation) ist ein
+  bewusster, akzeptierter Trade-off der Fixed-Body-Architektur — NICHT mit
+  ungetesteten Hacks „lösen".

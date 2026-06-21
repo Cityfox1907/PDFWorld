@@ -82,6 +82,7 @@ interface Snapshot {
   pages: EditorPage[];
   formValues: Record<string, string | boolean | string[]>;
   selectedElementId: string | null;
+  selectedElementIds: string[];
   currentPageId: string | null;
 }
 
@@ -255,6 +256,7 @@ function snapshot(s: StoreState): Snapshot {
     pages: clonePages(s.pages),
     formValues: structuredClone(s.formValues),
     selectedElementId: s.selectedElementId,
+    selectedElementIds: [...s.selectedElementIds],
     currentPageId: s.currentPageId,
   };
 }
@@ -711,7 +713,7 @@ export const useStore = create<StoreState>((set, get) => ({
         pages: prev.pages,
         formValues: prev.formValues,
         selectedElementId: prev.selectedElementId,
-        selectedElementIds: prev.selectedElementId ? [prev.selectedElementId] : [],
+        selectedElementIds: prev.selectedElementIds ?? (prev.selectedElementId ? [prev.selectedElementId] : []),
         currentPageId: prev.currentPageId ?? s.currentPageId,
       };
     });
@@ -726,7 +728,7 @@ export const useStore = create<StoreState>((set, get) => ({
         pages: next.pages,
         formValues: next.formValues,
         selectedElementId: next.selectedElementId,
-        selectedElementIds: next.selectedElementId ? [next.selectedElementId] : [],
+        selectedElementIds: next.selectedElementIds ?? (next.selectedElementId ? [next.selectedElementId] : []),
         currentPageId: next.currentPageId ?? s.currentPageId,
       };
     });

@@ -76,11 +76,14 @@ die bestehenden Seiten eingezeichnet.
   ist sofort beschreibbar; **Enter** beginnt einen neuen Absatz, **Esc** (oder ein Klick
   daneben) schliesst ab
 - **Hintergrund-Pinsel** – nimmt die exakte Hintergrundfarbe direkt unter dem
-  Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied. Wahlweise als
-  **freier Pinselstrich** oder als **randloses Rechteck** (ein Aufziehen füllt den
-  Block direkt mit der aufgenommenen Hintergrundfarbe). Die aufgenommene Farbe
-  wandert in die **Farbauswahl** und lässt sich per Klick als Schriftfarbe
-  weiterverwenden
+  Cursor auf und überdeckt Stellen ohne sichtbaren Unterschied. Eine **kleine Lupe**
+  am Zeiger zeigt dabei pixelgenau, **welcher Farbpixel** gerade aufgenommen wird
+  (samt Farbwert) – auf dem **Desktop schon beim Darüberfahren**, am **Handy beim
+  Aufsetzen des Fingers**, sodass die Lupe nie hinter dem Finger verschwindet.
+  Wahlweise als **freier Pinselstrich** oder als **randloses Rechteck** (ein
+  Aufziehen füllt den Block direkt mit der aufgenommenen Hintergrundfarbe). Die
+  aufgenommene Farbe wandert in die **Farbauswahl** und lässt sich per Klick als
+  Schriftfarbe weiterverwenden
 - **Neuen Text** hinzufügen – Standard **Grösse 9** und **Schwarz**, Auswahl aus
   einem Font-Picker mit **über 150 Schriften** (inkl. metrik-kompatibler Faces wie
   Arimo/Tinos/Carlito für Arial/Times/Calibri), der jeden Namen in seiner eigenen

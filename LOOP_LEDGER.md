@@ -202,3 +202,27 @@ typecheck ✅ · lint ✅ · build ✅ · `test:engine` 87/87 ✅.
   Gerätetest. Die Tastatur-Verdeckung (ursprüngliche #6-Motivation) ist ein
   bewusster, akzeptierter Trade-off der Fixed-Body-Architektur — NICHT mit
   ungetesteten Hacks „lösen".
+
+### 🔁 LOOP #9 — Nutzer-gewünscht (Hintergrund-Pinsel: Pixel-Lupe)
+- **Befund (Nutzer):** Der Hintergrund-Pinsel nimmt die Farbe zwar schon beim
+  Klick auf, aber man **sieht nicht, welchen Farbpixel** man trifft — besonders
+  auf der Webversion fühlt sich das Treffen der richtigen Stelle wie Raten an.
+  Gewünscht: eine **kleine Lupe am Zeiger**, die pixelgenau zeigt, welche Farbe
+  aufgenommen wird, und das **app-weit** (Web + Mobile).
+- **Gewählt:** Eine Magnifier-Lupe als reine **additive Overlay-Schicht** über dem
+  bewährten Sampling — kein Umbau der verlustfreien Cover-Logik (die per-Stelle-
+  Aufnahme bleibt, weil sie unsichtbar deckt). Höchster Hebel bei minimalem Risiko.
+- **Geändert:** `PageCanvas.tsx` — `BrushLoupe` (Body-Portal): blittet das
+  Bitmap-Quadrat unter dem Zeiger nearest-neighbour-gezoomt, markiert den exakten
+  Mittel-Pixel und zeigt den Farbwert; gespeist aus dem Overlay-`pointermove`
+  (Web: schon beim Hovern vor dem Klick; Touch: beim Aufsetzen, Lupe **über** dem
+  Finger). Farbe liest über denselben `sampleColorAt`/`sampleMap` wie der Pinsel →
+  Vorschau == Ergebnis. rAF-gedrosselt. `app.css` — Lupen-Styles. Zeiger
+  `cell` → `crosshair`. Da Desktop **und** Mobile denselben `PageCanvas` nutzen,
+  greift die Lupe app-weit.
+- **VERIFY:** ✅ — typecheck ✅ · lint ✅ (0 Warnungen) · build ✅ ·
+  test:engine 87/87 ✅. Regression keine (additives Overlay, nur bei aktivem
+  Pinsel; Engine/Cover-Logik unberührt).
+- **Richtung:** Pinsel-Treffsicherheit gelöst. Optional offen: striktes
+  Zwei-Stufen-„erst aufnehmen, dann malen" — bewusst NICHT erzwungen, da die
+  per-Stelle-Aufnahme besser unsichtbar deckt.

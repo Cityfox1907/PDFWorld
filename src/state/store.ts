@@ -104,6 +104,10 @@ export interface PendingTextStyle {
   embeddedFontId?: string;
   /** real typeface name of the adopted line, shown in the inspector after placing */
   fontLabel?: string;
+  /** extra spacing between characters (points), adopted from tracked headings etc. */
+  letterSpacing?: number;
+  /** horizontal glyph stretch factor (PDF Tz), adopted from stretched text; 1 = none */
+  stretchX?: number;
 }
 
 interface StoreState {
@@ -183,7 +187,10 @@ interface StoreState {
   closeImageEditor: () => void;
 
   // ── elements ──
-  addElement: (pageId: string, el: AnyElement) => void;
+  /** `select: false` keeps the current selection — used by the freehand tools so the
+   *  inspector stays on the TOOL settings (width/opacity) instead of jumping to the
+   *  freshly drawn stroke after every gesture. */
+  addElement: (pageId: string, el: AnyElement, opts?: { select?: boolean }) => void;
   /** Add several elements in ONE history step; selects `selectId` (else the last). */
   addElements: (pageId: string, els: AnyElement[], selectId?: string) => void;
   updateElement: (pageId: string, id: string, patch: ElementPatch) => void;
@@ -251,6 +258,41 @@ const DEFAULT_TOOL: ToolDefaults = {
   brushWidth: 18,
   brushColor: '#ffffff',
 };
+
+/**
+ * Tool settings survive reloads: they are restored from localStorage at startup and
+ * written back on every change (see setToolDefaults). Only keys that exist in
+ * DEFAULT_TOOL — with the matching type — are accepted, so a stale or foreign value
+ * can never corrupt the settings.
+ */
+const TOOL_DEFAULTS_KEY = 'pdfworld:tool-defaults';
+
+function readSavedToolDefaults(): ToolDefaults {
+  const base = { ...DEFAULT_TOOL };
+  try {
+    if (typeof window === 'undefined') return base;
+    const raw = window.localStorage.getItem(TOOL_DEFAULTS_KEY);
+    if (!raw) return base;
+    const saved = JSON.parse(raw) as Record<string, unknown>;
+    for (const key of Object.keys(base) as (keyof ToolDefaults)[]) {
+      const v = saved[key];
+      if (v !== undefined && typeof v === typeof base[key]) {
+        (base as Record<string, unknown>)[key] = v;
+      }
+    }
+  } catch {
+    /* corrupt storage → factory defaults */
+  }
+  return base;
+}
+
+function persistToolDefaults(tool: ToolDefaults): void {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem(TOOL_DEFAULTS_KEY, JSON.stringify(tool));
+  } catch {
+    /* storage full/blocked → settings simply stay session-only */
+  }
+}
 
 function visibleSize(p: EditorPage): { width: number; height: number } {
   const rot = (((p.baseRotation + p.addedRotation) % 360) + 360) % 360;
@@ -324,7 +366,7 @@ export const useStore = create<StoreState>((set, get) => ({
   flattenForm: false,
   xfaForm: false,
 
-  tool: { ...DEFAULT_TOOL },
+  tool: readSavedToolDefaults(),
   recentColors: [],
   clipboard: [],
   pendingTextStyle: null,
@@ -518,7 +560,11 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
   setToolDefaults(patch) {
-    set((s) => ({ tool: { ...s.tool, ...patch } }));
+    const tool = { ...get().tool, ...patch };
+    set({ tool });
+    // Keep the chosen widths/colours/opacities across sessions — nobody wants to
+    // re-dial the pen before every stroke.
+    persistToolDefaults(tool);
   },
   addRecentColor(color) {
     const hex = toHex(color);
@@ -534,12 +580,12 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ imageEditor: null });
   },
 
-  addElement(pageId, el) {
+  addElement(pageId, el, opts) {
     get().commit();
+    const select = opts?.select !== false;
     set((s) => ({
       pages: s.pages.map((p) => (p.id === pageId ? { ...p, elements: [...p.elements, el] } : p)),
-      selectedElementId: el.id,
-      selectedElementIds: [el.id],
+      ...(select ? { selectedElementId: el.id, selectedElementIds: [el.id] } : {}),
     }));
   },
   addElements(pageId, els, selectId) {

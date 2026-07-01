@@ -132,6 +132,20 @@ export interface TextElement extends BaseElement {
    * name instead of the generic fallback family. Purely informational.
    */
   fontLabel?: string;
+  /**
+   * Extra spacing between characters in points (CSS letter-spacing / PDF Tc), in
+   * UNSTRETCHED text space — `stretchX` multiplies it, exactly like PDF's Tz scales
+   * Tc. Absent/0 = normal tracking. Detected by the scan tool for spaced headings
+   * ("B U S I N E S S P L A N") and freely editable in the inspector.
+   */
+  letterSpacing?: number;
+  /**
+   * Horizontal glyph stretch factor (PDF Tz / text-matrix x-scale). 1 (or absent)
+   * = undistorted; >1 wider, <1 condensed. Rendered on screen via scaleX() and
+   * exported via the Tz text-state operator so distorted source text can be
+   * imitated 1:1.
+   */
+  stretchX?: number;
 }
 
 export interface RectElement extends BaseElement {
@@ -274,6 +288,14 @@ export interface TextRun {
   fontLabel?: string;
   /** true when the source PDF embeds this font (so it can be reused 1:1) */
   embedded?: boolean;
+  /**
+   * Detected extra per-character spacing in points (unstretched; see TextElement).
+   * Set for tracked/spaced lines so replacements and adopted styles imitate the
+   * spacing instead of collapsing "B U S I N E S S P L A N" to normal tracking.
+   */
+  letterSpacing?: number;
+  /** horizontal glyph stretch factor from the text matrix (PDF Tz); 1 = none */
+  stretchX?: number;
 }
 
 /** A fillable AcroForm field. */

@@ -81,8 +81,13 @@ export function sampleBackground(
 
 /**
  * Sample a single point's color on the rendered canvas, in view-point space.
- * Used by the background brush so a stroke perfectly matches the paper/page colour
- * directly under the cursor. Averages a small neighbourhood to cancel anti-alias noise.
+ * Used by the background brush (and its magnifier loupe) so a stroke matches the
+ * page directly under the cursor.
+ *
+ * Reads EXACTLY ONE pixel — the same one the loupe outlines (identical rounding as
+ * BrushLoupe). No neighbourhood averaging: averaging pulled in lighter neighbours
+ * near glyph/graphic edges, so the laid-down colour came out slightly lighter than
+ * the pixel the user aimed at in the loupe.
  *
  * `originX`/`originY` are the canvas's top-left in bitmap pixels (non-zero when the
  * canvas holds only the visible window of the page rather than the whole page).
@@ -97,29 +102,12 @@ export function sampleColorAt(
 ): string {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return '#ffffff';
-  const cx = Math.round(vx * scale - originX);
-  const cy = Math.round(vy * scale - originY);
-  const r = Math.max(1, Math.round(2 * scale));
-  const x = Math.max(0, cx - r);
-  const y = Math.max(0, cy - r);
-  const w = Math.min(canvas.width - x, r * 2 + 1);
-  const h = Math.min(canvas.height - y, r * 2 + 1);
-  if (w <= 0 || h <= 0) return '#ffffff';
+  const cx = Math.min(canvas.width - 1, Math.max(0, Math.round(vx * scale - originX)));
+  const cy = Math.min(canvas.height - 1, Math.max(0, Math.round(vy * scale - originY)));
   try {
-    const data = ctx.getImageData(x, y, w, h).data;
-    let rs = 0;
-    let gs = 0;
-    let bs = 0;
-    let n = 0;
-    for (let i = 0; i < data.length; i += 4) {
-      rs += data[i];
-      gs += data[i + 1];
-      bs += data[i + 2];
-      n++;
-    }
-    if (!n) return '#ffffff';
-    const hex = (v: number) => Math.round(v / n).toString(16).padStart(2, '0');
-    return `#${hex(rs)}${hex(gs)}${hex(bs)}`;
+    const d = ctx.getImageData(cx, cy, 1, 1).data;
+    const hex = (v: number) => v.toString(16).padStart(2, '0');
+    return `#${hex(d[0])}${hex(d[1])}${hex(d[2])}`;
   } catch {
     return '#ffffff';
   }

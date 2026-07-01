@@ -8,6 +8,7 @@ import {
   extractTextRuns,
   inspectFonts,
   groupRunsIntoLines,
+  detrackText,
   registerEmbeddedFont,
   textFaceCss,
   classifyFont,
@@ -28,6 +29,7 @@ import {
   type TextRun,
 } from '../lib/pdf';
 import { sampleBackground, sampleTextColor, sampleColorAt } from '../lib/utils/color';
+import { drawElementsRegion } from '../lib/utils/elementsRaster';
 import { nearestBaseline } from '../lib/utils/align';
 import { inkDashArray } from '../lib/utils/ink';
 import { uid } from '../lib/utils/id';
@@ -52,6 +54,9 @@ const OVERSCAN = 128;
 // screen bitmap) at this minimum density — ~288 DPI, print grade — so the floating
 // copy stays razor-sharp regardless of the current zoom. Capped by MAX_BITMAP_* below.
 const CUT_MIN_DENSITY = 4;
+// Extra margin (view-points) grabbed around a cut region, used only to sample the
+// TRUE surrounding background — including any overlay paint — for CUT mode's cover.
+const CUT_SAMPLE_PAD = 12;
 // Highlighter pen opacity (Multiply blend keeps the text underneath readable).
 const HIGHLIGHT_OPACITY = 0.4;
 // Magnification limits (25 %–2000 %) come from the store so the clamp lives once.
@@ -434,11 +439,23 @@ export function PageCanvas() {
           const italic = l.italic || !!realStyle?.italic || !!info?.italic;
           return { ...l, family, bold, italic, fontLabel, embedded, embeddedFontId };
         });
-        if (!cancelled) setRuns(enriched);
+        // Final style pass with the definitive faces: recognise spaced/tracked lines
+        // ("B U S I N E S S P L A N") and measure each line's true letter-spacing, so
+        // replacements and adopted styles imitate the exact look (incl. stretch).
+        const styled = await finalizeRunStyles(enriched);
+        if (!cancelled) setRuns(styled);
         } catch (err) {
           // Only the font refinement failed; the basic boxes from the extraction stay
           // on screen so the scan tool still works. Log the real cause, never swallow it.
           console.error('Scan-Schriftanalyse fehlgeschlagen – Basis-Boxen bleiben erhalten:', err);
+          // The spacing pass doesn't need the font inspection — run it on the basic
+          // boxes so tracked headings are still imitated correctly.
+          try {
+            const styled = await finalizeRunStyles(lines);
+            if (!cancelled) setRuns(styled);
+          } catch {
+            /* keep the basic boxes */
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -830,6 +847,9 @@ export function PageCanvas() {
         lineHeight,
         embeddedFontId: ps?.embeddedFontId,
         fontLabel: ps?.fontLabel,
+        // An adopted style reproduces the source line's full look: spacing & stretch too.
+        letterSpacing: ps?.letterSpacing,
+        stretchX: ps?.stretchX,
       };
       addElement(page.id, el);
       if (ps) setPendingTextStyle(null); // the armed typeface is now consumed
@@ -1044,6 +1064,8 @@ export function PageCanvas() {
       // A single click should still stamp a dot; duplicate the point so bake draws it.
       if (points.length === 1) points.push({ x: start.x + 0.01, y: start.y + 0.01 });
       const b = bounds();
+      // select:false — the brush stays armed and the inspector keeps showing the TOOL
+      // settings (width etc.) instead of jumping to the freshly painted stroke.
       addElement(page.id, {
         id: uid('el'),
         type: 'ink',
@@ -1056,7 +1078,7 @@ export function PageCanvas() {
         points,
         color,
         strokeWidth: width,
-      });
+      }, { select: false });
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -1110,6 +1132,7 @@ export function PageCanvas() {
       // A single tap still leaves a dab; duplicate the point so the bake draws it.
       if (points.length === 1) points.push({ x: start.x + 0.01, y: start.y + 0.01 });
       const b = bounds();
+      // select:false keeps the marker armed and its settings panel in place.
       addElement(page.id, {
         id: uid('el'),
         type: 'ink',
@@ -1123,7 +1146,7 @@ export function PageCanvas() {
         color,
         strokeWidth: width,
         highlight: true,
-      });
+      }, { select: false });
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -1167,6 +1190,8 @@ export function PageCanvas() {
       window.removeEventListener('pointerup', up);
       setDraft(null);
       if (rect && rect.width > 2 && rect.height > 2) {
+        // select:false — stay on the brush (tool panel included) so several spots
+        // can be covered in a row without the inspector flipping to the new block.
         addElement(page.id, {
           id: uid('el'),
           type: 'rect',
@@ -1177,8 +1202,7 @@ export function PageCanvas() {
           stroke: null,
           strokeWidth: 0,
           radius: 0,
-        });
-        // Stay on the brush so several spots can be covered in a row.
+        }, { select: false });
       }
     };
     window.addEventListener('pointermove', move);
@@ -1242,7 +1266,9 @@ export function PageCanvas() {
       const ok = isLine ? Math.max(last.width, last.height) > 6 : last.width > 4 && last.height > 4;
       if (ok) {
         const el = isLine ? { ...last, width: Math.max(last.width, 1), height: Math.max(last.height, 1) } : last;
-        addElement(page.id, el);
+        // While the marking tool stays active, don't hijack the selection/panel —
+        // the next rectangle can be dragged right away with the same settings.
+        addElement(page.id, el, keepActive ? { select: false } : undefined);
         if (!keepActive) setTool('select');
       }
     };
@@ -1291,51 +1317,74 @@ export function PageCanvas() {
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
-  // Rasterise a page region STRAIGHT FROM THE PDF (not the screen bitmap) at a high,
-  // print-grade density, so the duplicate is a 1:1 copy of the original at any zoom —
-  // never the screen's current resolution. Returns a lossless PNG data URL, or null
-  // (blank pages / render failure) so the caller can fall back to the on-screen copy.
-  const captureRegionHiRes = async (vx: number, vy: number, vw: number, vh: number): Promise<string | null> => {
-    if (!page || page.blank) return null;
-    try {
-      const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
-      const wanted = Math.max(CUT_MIN_DENSITY, scale * TARGET_DENSITY);
-      const cap = Math.min(MAX_BITMAP_DIM / vw, MAX_BITMAP_DIM / vh, Math.sqrt(MAX_BITMAP_AREA / (vw * vh)));
-      const density = Math.max(1, Math.min(wanted, cap));
-      const off = document.createElement('canvas');
-      off.width = Math.max(1, Math.round(vw * density));
-      off.height = Math.max(1, Math.round(vh * density));
-      await renderPageRegion(pdfPage, off, density, rotation, vx * density, vy * density);
-      return off.toDataURL('image/png');
-    } catch {
-      return null;
+  // Compose a page region exactly as the user currently SEES it: the source PDF (or
+  // blank paper) rendered straight from the vector data at print-grade density, PLUS
+  // every visible overlay edit (drawings, covers, text, images …) on top. This is what
+  // lets the cut/copy tool lift content that was painted or typed onto the page — not
+  // just the original document. If the direct PDF render fails, the on-screen bitmap
+  // fills in as the underlay so the tool keeps working.
+  const buildRegionCanvas = async (
+    vx: number,
+    vy: number,
+    vw: number,
+    vh: number,
+  ): Promise<{ canvas: HTMLCanvasElement; density: number } | null> => {
+    if (!page || vw <= 0 || vh <= 0) return null;
+    const wanted = Math.max(CUT_MIN_DENSITY, scale * TARGET_DENSITY);
+    const cap = Math.min(MAX_BITMAP_DIM / vw, MAX_BITMAP_DIM / vh, Math.sqrt(MAX_BITMAP_AREA / (vw * vh)));
+    const density = Math.max(1, Math.min(wanted, cap));
+    const off = document.createElement('canvas');
+    off.width = Math.max(1, Math.round(vw * density));
+    off.height = Math.max(1, Math.round(vh * density));
+    const ctx = off.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, off.width, off.height);
+    if (!page.blank) {
+      try {
+        const pdfPage = await engine.getPage(page.sourceKey, page.sourceIndex);
+        await renderPageRegion(pdfPage, off, density, rotation, vx * density, vy * density);
+      } catch {
+        // Rare render failure → blit the (lower-res) screen bitmap as the underlay.
+        const sc = canvasRef.current;
+        if (sc) {
+          const { px, ox, oy } = sampleMap();
+          try {
+            ctx.drawImage(sc, vx * px - ox, vy * px - oy, vw * px, vh * px, 0, 0, off.width, off.height);
+          } catch {
+            /* keep plain paper */
+          }
+        }
+      }
     }
+    try {
+      await drawElementsRegion(ctx, page.elements, vx, vy, density);
+    } catch (err) {
+      // The piece then misses the overlays but the cut still succeeds.
+      console.error('Overlay-Elemente konnten nicht in den Ausschnitt gezeichnet werden:', err);
+    }
+    return { canvas: off, density };
   };
 
-  // Fallback copy from the on-screen bitmap (used for blank pages, where there is no
-  // PDF content to re-rasterise — the region is just paper colour anyway).
-  const captureRegionFromScreen = (vx: number, vy: number, vw: number, vh: number): string | null => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const { px, ox, oy } = sampleMap();
-    const sx = Math.max(0, Math.round(vx * px - ox));
-    const sy = Math.max(0, Math.round(vy * px - oy));
-    const ex = Math.min(canvas.width, Math.round((vx + vw) * px - ox));
-    const ey = Math.min(canvas.height, Math.round((vy + vh) * px - oy));
-    const cw = ex - sx;
-    const ch = ey - sy;
-    if (cw <= 1 || ch <= 1) return null;
-    const off = document.createElement('canvas');
-    off.width = cw;
-    off.height = ch;
-    const octx = off.getContext('2d');
-    if (!octx) return null;
-    octx.drawImage(canvas, sx, sy, cw, ch, 0, 0, cw, ch);
-    try {
-      return off.toDataURL('image/png');
-    } catch {
-      return null;
-    }
+  // Crop the region (view-points) out of a grabbed canvas into its own — alpha-capable,
+  // so the lasso variant can mask it to the traced outline afterwards.
+  const cropRegionCanvas = (
+    grab: { canvas: HTMLCanvasElement; density: number },
+    gx: number,
+    gy: number,
+    vx: number,
+    vy: number,
+    vw: number,
+    vh: number,
+  ): HTMLCanvasElement | null => {
+    const d = grab.density;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(vw * d));
+    c.height = Math.max(1, Math.round(vh * d));
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(grab.canvas, (vx - gx) * d, (vy - gy) * d, vw * d, vh * d, 0, 0, c.width, c.height);
+    return c;
   };
 
   // ── lasso variant of the cut tool: trace any shape with the mouse held down, and
@@ -1385,46 +1434,24 @@ export function PageCanvas() {
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
-  // Clip a captured region PNG to a lasso polygon (keeps only the interior).
-  const maskToPolygon = (src: string, pts: { x: number; y: number }[], vx: number, vy: number, vw: number, vh: number): Promise<string | null> =>
-    new Promise((resolve) => {
-      const im = new Image();
-      im.onload = () => {
-        const c = document.createElement('canvas');
-        c.width = im.width;
-        c.height = im.height;
-        const ctx = c.getContext('2d');
-        if (!ctx) return resolve(null);
-        ctx.drawImage(im, 0, 0);
-        const sx = im.width / vw;
-        const sy = im.height / vh;
-        ctx.globalCompositeOperation = 'destination-in';
-        ctx.beginPath();
-        pts.forEach((p, i) => {
-          const x = (p.x - vx) * sx;
-          const y = (p.y - vy) * sy;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.closePath();
-        ctx.fill();
-        try {
-          resolve(c.toDataURL('image/png'));
-        } catch {
-          resolve(null);
-        }
-      };
-      im.onerror = () => resolve(null);
-      im.src = src;
+  // Clip a captured region canvas to a lasso polygon (keeps only the interior).
+  const maskCanvasToPolygon = (c: HTMLCanvasElement, pts: { x: number; y: number }[], vx: number, vy: number, vw: number, vh: number): boolean => {
+    const ctx = c.getContext('2d');
+    if (!ctx) return false;
+    const sx = c.width / vw;
+    const sy = c.height / vh;
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const x = (p.x - vx) * sx;
+      const y = (p.y - vy) * sy;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     });
-
-  // Background colour around the region's border — what CUT mode paints over the
-  // source area so the lifted piece really "leaves a clean page" behind.
-  const sampleRegionBackground = (vx: number, vy: number, vw: number, vh: number): string => {
-    const canvas = canvasRef.current;
-    if (!canvas) return '#ffffff';
-    const { px, ox, oy } = sampleMap();
-    return sampleBackground(canvas, { x: vx, y: vy, width: vw, height: vh }, px, ox, oy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    return true;
   };
 
   // A solid-colour PNG clipped to the lasso polygon (CUT mode's cover for a freehand
@@ -1456,6 +1483,25 @@ export function PageCanvas() {
     }
   };
 
+  // Grab region + sampling margin in ONE render, crop the piece out of it and read the
+  // surrounding background from the same composite — shared by both cut variants.
+  const grabRegionPiece = async (vx: number, vy: number, vw: number, vh: number) => {
+    const gx = Math.max(0, vx - CUT_SAMPLE_PAD);
+    const gy = Math.max(0, vy - CUT_SAMPLE_PAD);
+    const gw = Math.min(view.width, vx + vw + CUT_SAMPLE_PAD) - gx;
+    const gh = Math.min(view.height, vy + vh + CUT_SAMPLE_PAD) - gy;
+    const grab = await buildRegionCanvas(gx, gy, gw, gh);
+    if (!grab) return null;
+    const piece = cropRegionCanvas(grab, gx, gy, vx, vy, vw, vh);
+    if (!piece) return null;
+    // Background around the region's border, read from the COMPOSITE (page + overlay
+    // edits): if the user painted this area, CUT's cover matches that paint instead of
+    // uncovering the original page colour.
+    const background = () =>
+      sampleBackground(grab.canvas, { x: vx, y: vy, width: vw, height: vh }, grab.density, gx * grab.density, gy * grab.density);
+    return { piece, background };
+  };
+
   const cutRegionLasso = async (pts: { x: number; y: number }[]) => {
     if (!page) return;
     let minX = Infinity;
@@ -1476,13 +1522,15 @@ export function PageCanvas() {
       showToast('Bereich ist zu klein.', 'error');
       return;
     }
-    const src = (await captureRegionHiRes(vx, vy, vw, vh)) ?? captureRegionFromScreen(vx, vy, vw, vh);
-    if (!src) {
+    const grabbed = await grabRegionPiece(vx, vy, vw, vh);
+    if (!grabbed || !maskCanvasToPolygon(grabbed.piece, pts, vx, vy, vw, vh)) {
       showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
       return;
     }
-    const masked = await maskToPolygon(src, pts, vx, vy, vw, vh);
-    if (!masked) {
+    let masked: string;
+    try {
+      masked = grabbed.piece.toDataURL('image/png');
+    } catch {
       showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
       return;
     }
@@ -1490,7 +1538,7 @@ export function PageCanvas() {
     const els: AnyElement[] = [];
     const zBase = nextZ(page);
     if (isCut) {
-      const cover = solidPolygonPng(pts, vx, vy, vw, vh, sampleRegionBackground(vx, vy, vw, vh));
+      const cover = solidPolygonPng(pts, vx, vy, vw, vh, grabbed.background());
       if (cover) els.push({ id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh, opacity: 1, z: zBase, src: cover, aspect: vw / vh });
     }
     const piece: AnyElement = { id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh, opacity: 1, z: zBase + 1, src: masked, aspect: vw / vh };
@@ -1513,22 +1561,32 @@ export function PageCanvas() {
       return;
     }
 
-    const src = (await captureRegionHiRes(vx, vy, vw, vh)) ?? captureRegionFromScreen(vx, vy, vw, vh);
-    if (!src) {
+    // The grabbed piece is the page + every overlay edit, flattened — so cutting an
+    // area that was painted or typed over lifts exactly what is visible there.
+    const grabbed = await grabRegionPiece(vx, vy, vw, vh);
+    if (!grabbed) {
+      showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
+      return;
+    }
+    let src: string;
+    try {
+      src = grabbed.piece.toDataURL('image/png');
+    } catch {
       showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
       return;
     }
 
     // A free-floating, full-quality piece of the region. The PDF content itself is
     // never modified: CUT covers the source area with the sampled page background,
-    // COPY leaves it fully visible.
+    // COPY leaves it fully visible. The cover sits ABOVE the existing overlay
+    // elements (zBase = top), so edits inside the region disappear with the piece.
     const isCut = tool.cutAction === 'cut';
     const els: AnyElement[] = [];
     const zBase = nextZ(page);
     if (isCut) {
       els.push({
         id: uid('el'), type: 'rect', x: vx, y: vy, width: vw, height: vh,
-        opacity: 1, z: zBase, fill: sampleRegionBackground(vx, vy, vw, vh), stroke: null, strokeWidth: 0, radius: 0,
+        opacity: 1, z: zBase, fill: grabbed.background(), stroke: null, strokeWidth: 0, radius: 0,
       });
     }
     const piece: AnyElement = {
@@ -1587,6 +1645,10 @@ export function PageCanvas() {
       setDraft(null);
       if (points.length > 1) {
         const b = bounds();
+        // select:false — the pen stays armed and the inspector keeps showing the pen's
+        // OWN settings (Stärke/Deckkraft/Stil). Selecting each stroke used to flip the
+        // panel to the element, so adjustments landed on the finished stroke instead of
+        // the tool — which looked like the settings "reset" before every new stroke.
         addElement(page.id, {
           id: uid('el'),
           type: 'ink',
@@ -1597,7 +1659,7 @@ export function PageCanvas() {
           z: nextZ(page),
           points,
           ...style,
-        });
+        }, { select: false });
       }
     };
     window.addEventListener('pointermove', move);
@@ -1677,7 +1739,11 @@ export function PageCanvas() {
     const off = (size * (SCAN_LINE_HEIGHT - 1)) / 2;
     const lines = text.length ? text.split('\n') : [''];
     const font = runFontString(run);
-    const width = Math.max(size * 0.6, ...lines.map((l) => measureLineWidth(l, font)));
+    const ls = run.letterSpacing ?? 0;
+    const sx = run.stretchX ?? 1;
+    // Box width = widest line incl. letter-spacing (CSS adds it after every char)
+    // and horizontal stretch — so the box hugs exactly what is rendered.
+    const width = Math.max(size * 0.6, ...lines.map((l) => (measureLineWidth(l, font) + ls * [...l].length) * sx));
     const el: TextElement = {
       id: uid('el'),
       type: 'text',
@@ -1704,6 +1770,10 @@ export function PageCanvas() {
       replacesRun: runKey(run),
       embeddedFontId: run.embeddedFontId,
       fontLabel: run.fontLabel,
+      // Carry the line's detected spacing & stretch so the replacement (and any text
+      // typed into it later) keeps the original's exact look.
+      letterSpacing: ls || undefined,
+      stretchX: sx !== 1 ? sx : undefined,
     };
     addElement(page.id, el);
     if (!text.trim()) showToast('Zeile entfernt – ⌘Z macht es rückgängig', 'info');
@@ -1725,6 +1795,8 @@ export function PageCanvas() {
       lineHeight: SCAN_LINE_HEIGHT,
       embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
       fontLabel: run.fontLabel, // carry the real name so the inspector shows it
+      letterSpacing: run.letterSpacing, // spaced headings stay spaced in new text
+      stretchX: run.stretchX, // and stretched/distorted styles stay stretched
     });
     setTool('text'); // arm placement; the next click drops the field in this font
     showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
@@ -2092,17 +2164,67 @@ function measureLineWidth(line: string, font: string): number {
   return measureCtx.measureText(line).width;
 }
 
-/** Caret index whose prefix width is closest to `x` (view-points from the line start). */
-function caretIndexAtX(text: string, x: number, font: string): number {
+/** Caret index whose prefix width is closest to `x` (view-points from the line start,
+ *  already UNSTRETCHED by the caller; `letterSpacing` follows each character, like CSS). */
+function caretIndexAtX(text: string, x: number, font: string, letterSpacing = 0): number {
   const line = text.split('\n')[0];
   if (x <= 0) return 0;
   let prev = 0;
   for (let i = 1; i <= line.length; i++) {
-    const w = measureLineWidth(line.slice(0, i), font);
+    const w = measureLineWidth(line.slice(0, i), font) + letterSpacing * i;
     if (w >= x) return x - prev < w - x ? i - 1 : i;
     prev = w;
   }
   return line.length;
+}
+
+/**
+ * Final styling pass over the scanned lines: recognise SPACED / TRACKED text and
+ * measure each line's true letter-spacing with the very face the editor will use.
+ *
+ *  • "B U S I N E S S P L A N" written with literal pseudo-spaces (pdf.js inserts
+ *    them for TJ-spaced headings) is collapsed back to its real characters
+ *    (detrackText); the reclaimed width becomes letterSpacing.
+ *  • The spacing itself is derived from geometry: how much wider the ORIGINAL line
+ *    is than the same characters rendered naturally in the replacement face —
+ *    `(width/stretch − natural) / (chars − 1)`. With the embedded original font
+ *    that IS the PDF's true tracking; with a fallback face the spacing additionally
+ *    absorbs the metric difference, so the imitation always spans the original's
+ *    exact width. Ordinary lines need a clear margin above face-mismatch noise
+ *    before any spacing is applied, so body text never picks up phantom tracking.
+ *
+ * The faces are loaded first (document.fonts.load) so the measurement never runs
+ * against a not-yet-loaded @font-face fallback.
+ */
+async function finalizeRunStyles(lines: TextRun[]): Promise<TextRun[]> {
+  return Promise.all(
+    lines.map(async (l) => {
+      const de = detrackText(l.str);
+      const geoHint = l.letterSpacing ?? 0; // median letter gap from the line grouping
+      const tracked = de.tracked || geoHint > 0;
+      const out: TextRun = { ...l, str: de.text, letterSpacing: tracked && geoHint > 0 ? geoHint : undefined };
+      const chars = [...de.text].length;
+      if (chars < 3) return out;
+      const font = runFontString(l);
+      try {
+        await document.fonts.load(font, de.text);
+      } catch {
+        /* system face or offline — measureLineWidth falls back gracefully */
+      }
+      const natural = measureLineWidth(de.text, font);
+      if (!(natural > 1)) return de.tracked && !(geoHint > 0) ? l : out;
+      const per = (l.width / (l.stretchX ?? 1) - natural) / (chars - 1);
+      // Tracked lines take the measured value directly; ordinary lines only when the
+      // extra width is clearly more than face-mismatch noise (~3.5 % of the size).
+      const noise = tracked ? 0 : l.fontSize * 0.035;
+      if (per > noise && per < l.fontSize * 2) return { ...out, letterSpacing: per };
+      // Safety anchor: a pseudo-spaced line whose measurement yields NO positive
+      // spacing keeps its original literal spaces — never render it narrower than
+      // the page shows it.
+      if (de.tracked && !(geoHint > 0)) return l;
+      return out;
+    }),
+  );
 }
 
 /**
@@ -2165,8 +2287,14 @@ function RunEditor({
   const off = (size * (SCAN_LINE_HEIGHT - 1)) / 2;
   const pad = coverInsets(size);
   const face = textFaceCss(run.family, run.embeddedFontId, run.bold, run.italic);
+  // Detected letter-spacing (unstretched) & horizontal stretch: the editor renders
+  // them live, so a spaced/stretched heading looks identical while being retyped.
+  const ls = run.letterSpacing ?? 0;
+  const sx = run.stretchX ?? 1;
+  // content.w is the UNSTRETCHED text width; multiply by sx wherever the visual
+  // (page-space) width is needed.
   const [content, setContent] = useState<{ w: number; h: number }>({
-    w: Math.max(run.width, size * 0.6),
+    w: Math.max(run.width / sx, size * 0.6),
     h: size * SCAN_LINE_HEIGHT,
   });
 
@@ -2217,8 +2345,9 @@ function RunEditor({
     ta.focus();
     autoFit(ta);
     // Put the caret where the user clicked in the line, measured with the same face
-    // the line renders in; fall back to the end of the text.
-    const idx = caretX != null ? caretIndexAtX(ta.value, caretX - run.x, runFontString(run)) : ta.value.length;
+    // the line renders in (click offset unstretched to match the glyph layout);
+    // fall back to the end of the text.
+    const idx = caretX != null ? caretIndexAtX(ta.value, (caretX - run.x) / sx, runFontString(run), ls) : ta.value.length;
     ta.setSelectionRange(idx, idx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2235,7 +2364,7 @@ function RunEditor({
         style={{
           left: -pad.x * scale,
           top: (off - pad.y) * scale,
-          width: (Math.max(run.width, content.w) + pad.x * 2) * scale,
+          width: (Math.max(run.width, content.w * sx) + pad.x * 2) * scale,
           height: (run.height + pad.y * 2) * scale,
           background: bg,
         }}
@@ -2253,6 +2382,10 @@ function RunEditor({
           color,
           width: content.w * scale + 4,
           height: content.h * scale,
+          // Imitate the line's exact look while editing: spacing between the letters
+          // (CSS letter-spacing) and, for distorted text, the horizontal stretch.
+          letterSpacing: ls ? `${ls * scale}px` : undefined,
+          ...(sx !== 1 ? { transform: `scaleX(${sx})`, transformOrigin: '0 0' } : {}),
         }}
         onChange={(e) => autoFit(e.currentTarget)}
         onBlur={() => finish(false)}

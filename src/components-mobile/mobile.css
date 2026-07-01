@@ -671,10 +671,7 @@ html:has(.m-app) .toast {
 
 /* ── SCAN TOOL on a phone ──
    The detected-line boxes are tiny at fit scale, so enlarge their invisible tap target
-   (the visible tint stays put). The font-info panel is re-anchored to a full-width card
-   pinned just above the dock — !important beats the component's inline left/top/width so
-   it is always fully on-screen and finger-sized, instead of a 268-px popover hanging off
-   the edge of a small page. */
+   (the visible tint stays put). */
 .m-app .run-box {
   touch-action: none;
   /* On the web a faint tint is enough because of hover; on a phone there is no hover and
@@ -682,10 +679,6 @@ html:has(.m-app) .toast {
      (like the web's hover state) the moment the scan finishes. */
   background: var(--accent-ring);
   box-shadow: inset 0 0 0 1px var(--accent);
-}
-.m-app .run-box.active {
-  background: var(--accent-ring);
-  box-shadow: inset 0 0 0 1.5px var(--accent), 0 2px 12px var(--accent-tint);
 }
 /* A generous invisible margin around each chip so a fingertip lands it even when the
    lines are small and tightly stacked at fit scale. */
@@ -699,21 +692,20 @@ html:has(.m-app) .toast {
      would never appear — keep it always visible and a touch larger for legibility. */
   opacity: 1;
 }
-.m-app .font-panel {
-  position: fixed !important;
-  left: 12px !important;
-  right: 12px !important;
-  top: auto !important;
-  bottom: calc(12px + env(safe-area-inset-bottom)) !important;
-  width: auto !important;
-  max-width: none !important;
-  border-radius: 18px;
-  box-shadow: var(--shadow-lg);
-  z-index: 95;
+/* The in-place editor's info chip: finger-sized touch targets on a phone. */
+.m-app .run-editor-chip {
+  height: 36px;
+  gap: 9px;
+  padding: 0 8px 0 12px;
+  font-size: 13px;
 }
-.m-app .font-panel .btn {
-  min-height: 44px;
-  font-size: 14px;
+.m-app .run-chip-btn {
+  width: 30px;
+  height: 30px;
+}
+.m-app .run-chip-swatch {
+  width: 19px;
+  height: 19px;
 }
 
 /* ── APP-NATIVE CONFIRM DIALOG ──

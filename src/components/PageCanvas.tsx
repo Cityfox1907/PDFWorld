@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore, visibleSize, type EditorPage } from '../state/store';
 import { useUI } from '../state/ui';
@@ -16,6 +16,8 @@ import {
   fontDisplayName,
   BASELINE_RATIO,
   firstBaselineOffset,
+  coverInsets,
+  SCAN_LINE_HEIGHT,
   shapeOutline,
   pointsToSvgPath,
   isStrokeOnlyShape,
@@ -30,7 +32,7 @@ import { nearestBaseline } from '../lib/utils/align';
 import { inkDashArray } from '../lib/utils/ink';
 import { uid } from '../lib/utils/id';
 import { ElementView } from './ElementView';
-import { Type, Check, X, Plus } from 'lucide-react';
+import { Type, Check, X } from 'lucide-react';
 
 const DEVICE_PIXEL_RATIO = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 // Density at which the visible window is rasterised. We render at (at least) the
@@ -68,6 +70,7 @@ export function PageCanvas() {
   const activeTool = useStore((s) => s.activeTool);
   const tool = useStore((s) => s.tool);
   const addElement = useStore((s) => s.addElement);
+  const addElements = useStore((s) => s.addElements);
   const updateElement = useStore((s) => s.updateElement);
   const deleteElement = useStore((s) => s.deleteElement);
   const commit = useStore((s) => s.commit);
@@ -122,9 +125,10 @@ export function PageCanvas() {
   const [tapCorner, setTapCorner] = useState<{ x: number; y: number } | null>(null);
   const [runs, setRuns] = useState<TextRun[]>([]);
   const [scanId, setScanId] = useState(0);
-  // Scan tool: the line whose font panel is open, plus its sampled colours.
-  const [pickedRun, setPickedRun] = useState<number | null>(null);
-  const [pickInfo, setPickInfo] = useState<{ color: string; bg: string } | null>(null);
+  // Scan tool: the line currently being edited IN PLACE (Acrobat-style), with the
+  // colours sampled from the page (ink + background cover) and the click position
+  // for the initial caret. Nothing is added to the document until the text changes.
+  const [runEdit, setRunEdit] = useState<{ idx: number; color: string; bg: string; caretX: number | null } | null>(null);
   // Active alignment guides (view-points) shown while moving text: a baseline (Y)
   // and a left-edge (X), so both horizontal and vertical alignment are confirmed.
   const [alignGuideY, setAlignGuideY] = useState<number | null>(null);
@@ -148,7 +152,7 @@ export function PageCanvas() {
   const pageId = page?.id;
   useEffect(() => {
     setEditingId(null);
-    setPickedRun(null);
+    setRunEdit(null);
     setAlignGuideY(null);
     setAlignGuideX(null);
     setScanBaselines([]);
@@ -351,14 +355,14 @@ export function PageCanvas() {
   useEffect(() => {
     if (activeTool !== 'edit-text') {
       setRuns([]);
-      setPickedRun(null);
+      setRunEdit(null);
       return;
     }
     // The scan tool is active but there is nothing to analyse (a freshly added blank page
     // or a page with no embedded text). Say so, so tapping "Scan" never feels like a no-op.
     if (pageSourceKey === undefined || pageSourceIndex === undefined || pageBlank) {
       setRuns([]);
-      setPickedRun(null);
+      setRunEdit(null);
       showToast('Leere Seite – kein Text zum Scannen.', 'info');
       return;
     }
@@ -375,7 +379,8 @@ export function PageCanvas() {
         const lines = groupRunsIntoLines(r);
         setRuns(lines); // show the clickable boxes immediately
         if (lines.length === 0) showToast('Kein bearbeitbarer Text auf dieser Seite gefunden.', 'info');
-        setPickedRun(null);
+        else showToast(`${lines.length} Zeile${lines.length === 1 ? '' : 'n'} erkannt – Zeile anklicken und Text direkt bearbeiten`, 'success');
+        setRunEdit(null);
         setScanId((n) => n + 1); // replay the scan sweep once per real scan
         // Remember each line's baseline AND left edge so a moved text box can snap
         // onto the real glyphs (baseline = horizontal, left edge = vertical).
@@ -774,17 +779,19 @@ export function PageCanvas() {
       return;
     }
     if (activeTool === 'edit-text') {
-      // A tap on (or near) a detected line opens that line's font panel. Resolving the
-      // nearest run here — at the overlay level, with a generous fingertip slack — means a
-      // tap lands the right line even when the boxes are tiny on a phone (a direct hit on
-      // a RunBox is still handled by the box itself). A tap on bare paper just clears.
+      // A tap on (or near) a detected line starts editing that line IN PLACE. Resolving
+      // the nearest run here — at the overlay level, with a generous fingertip slack —
+      // means a tap lands the right line even when the boxes are tiny on a phone (a
+      // direct hit on a RunBox is still handled by the box itself). A tap on bare paper
+      // just closes the current editor (its blur commits any change).
       const idx = nearestRunIndex(start);
       if (idx != null) {
-        pickRun(idx);
+        e.preventDefault(); // keep focus deterministic for the editor we open
+        beginRunEdit(idx, start.x);
         return;
       }
       setEditingId(null);
-      setPickedRun(null);
+      setRunEdit(null);
       selectElement(null);
       return;
     }
@@ -954,30 +961,33 @@ export function PageCanvas() {
     if (!page) return;
     const additive = e.shiftKey;
     let moved = false;
+    // The gesture's own record of the rectangle. Deliberately NOT read back from the
+    // marquee state inside a setState updater: updaters must stay pure (StrictMode
+    // invokes them twice), so all side effects happen out here.
+    let rect: { x: number; y: number; width: number; height: number } | null = null;
     const move = (ev: PointerEvent) => {
       const p = evToView(ev);
       if (!moved && Math.abs(p.x - start.x) + Math.abs(p.y - start.y) <= 3 / scale) return;
       moved = true;
-      setMarquee({
+      rect = {
         x: Math.min(start.x, p.x),
         y: Math.min(start.y, p.y),
         width: Math.abs(p.x - start.x),
         height: Math.abs(p.y - start.y),
-      });
+      };
+      setMarquee(rect);
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      setMarquee((m) => {
-        if (m && moved && (m.width > 3 / scale || m.height > 3 / scale)) {
-          const ids = page.elements.filter((el) => !el.hidden && rectsIntersect(m, el)).map((el) => el.id);
-          if (ids.length) {
-            const prev = additive ? useStore.getState().selectedElementIds : [];
-            selectElements([...prev, ...ids]);
-          }
+      setMarquee(null);
+      if (rect && moved && (rect.width > 3 / scale || rect.height > 3 / scale)) {
+        const ids = page.elements.filter((el) => !el.hidden && rectsIntersect(rect!, el)).map((el) => el.id);
+        if (ids.length) {
+          const prev = additive ? useStore.getState().selectedElementIds : [];
+          selectElements([...prev, ...ids]);
         }
-        return null;
-      });
+      }
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -1129,17 +1139,21 @@ export function PageCanvas() {
     const color = canvas ? sampleColorAt(canvas, start.x, start.y, px, ox, oy) : '#ffffff';
     setToolDefaults({ brushColor: color });
     addRecentColor(color);
+    // Gesture-local rect; side effects never live inside a setState updater
+    // (StrictMode double-invokes updaters — the block would be added twice).
+    let rect: { x: number; y: number; width: number; height: number } | null = null;
     const move = (ev: PointerEvent) => {
       const p = evToView(ev);
-      const x = Math.min(start.x, p.x);
-      const y = Math.min(start.y, p.y);
+      rect = {
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        width: Math.abs(p.x - start.x),
+        height: Math.abs(p.y - start.y),
+      };
       setDraft({
         id: 'draft-bgrect',
         type: 'rect',
-        x,
-        y,
-        width: Math.abs(p.x - start.x),
-        height: Math.abs(p.y - start.y),
+        ...rect,
         opacity: 1,
         z: nextZ(page),
         fill: color,
@@ -1151,26 +1165,21 @@ export function PageCanvas() {
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      setDraft((d) => {
-        if (d && d.width > 2 && d.height > 2) {
-          addElement(page.id, {
-            id: uid('el'),
-            type: 'rect',
-            x: d.x,
-            y: d.y,
-            width: d.width,
-            height: d.height,
-            opacity: 1,
-            z: nextZ(page),
-            fill: color,
-            stroke: null,
-            strokeWidth: 0,
-            radius: 0,
-          });
-          // Stay on the brush so several spots can be covered in a row.
-        }
-        return null;
-      });
+      setDraft(null);
+      if (rect && rect.width > 2 && rect.height > 2) {
+        addElement(page.id, {
+          id: uid('el'),
+          type: 'rect',
+          ...rect,
+          opacity: 1,
+          z: nextZ(page),
+          fill: color,
+          stroke: null,
+          strokeWidth: 0,
+          radius: 0,
+        });
+        // Stay on the brush so several spots can be covered in a row.
+      }
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -1201,61 +1210,68 @@ export function PageCanvas() {
       return { ...base, type: 'rect', x, y, width: w, height: h, fill: tool.shapeFill, stroke: tool.shapeStroke, strokeWidth: 1.5, radius: 0 };
     };
     let moved = false;
+    // Gesture-local copy of the draft; side effects never live inside a setState
+    // updater (StrictMode double-invokes updaters — the shape would be added twice).
+    let last: AnyElement | null = null;
     const move = (ev: PointerEvent) => {
       const p = evToView(ev);
       if (Math.abs(p.x - start.x) + Math.abs(p.y - start.y) > 2 / scale) moved = true;
       const x = Math.min(start.x, p.x);
       const y = Math.min(start.y, p.y);
       const flip = (p.x - start.x) * (p.y - start.y) < 0; // dragged ↗ / ↙
-      setDraft(make(Math.abs(p.x - start.x), Math.abs(p.y - start.y), x, y, flip));
+      last = make(Math.abs(p.x - start.x), Math.abs(p.y - start.y), x, y, flip);
+      setDraft(last);
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      setDraft((d) => {
-        // A click with no drag on a shape tool: place a default-sized shape centred on
-        // the click, ready to style and move — no aiming or aspect guesswork needed.
-        if (!moved && clickToPlace) {
-          const isLine = activeTool === 'shape' && tool.shapeKind === 'line';
-          const w = isLine ? 150 : 130;
-          const h = isLine ? 90 : 96;
-          addElement(page.id, make(w, h, start.x - w / 2, start.y - h / 2, false));
-          setTool('select');
-          return null;
-        }
-        if (!d) return null;
-        // A line only needs length in one axis; give it a selectable thickness.
-        const isLine = d.type === 'shape' && d.shape === 'line';
-        const ok = isLine ? Math.max(d.width, d.height) > 6 : d.width > 4 && d.height > 4;
-        if (ok) {
-          const el = isLine ? { ...d, width: Math.max(d.width, 1), height: Math.max(d.height, 1) } : d;
-          addElement(page.id, el);
-          if (!keepActive) setTool('select');
-        }
-        return null;
-      });
+      setDraft(null);
+      // A click with no drag on a shape tool: place a default-sized shape centred on
+      // the click, ready to style and move — no aiming or aspect guesswork needed.
+      if (!moved && clickToPlace) {
+        const isLine = activeTool === 'shape' && tool.shapeKind === 'line';
+        const w = isLine ? 150 : 130;
+        const h = isLine ? 90 : 96;
+        addElement(page.id, make(w, h, start.x - w / 2, start.y - h / 2, false));
+        setTool('select');
+        return;
+      }
+      if (!last) return;
+      // A line only needs length in one axis; give it a selectable thickness.
+      const isLine = last.type === 'shape' && last.shape === 'line';
+      const ok = isLine ? Math.max(last.width, last.height) > 6 : last.width > 4 && last.height > 4;
+      if (ok) {
+        const el = isLine ? { ...last, width: Math.max(last.width, 1), height: Math.max(last.height, 1) } : last;
+        addElement(page.id, el);
+        if (!keepActive) setTool('select');
+      }
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
 
-  // ── region-duplicate tool ("Ausschneiden"): marquee a rectangle and lift a free-
-  // floating 1:1 copy of it. The ORIGINAL page content is never cut out or covered —
-  // the copy simply lies on top, ready to drag away, leaving the document untouched. ──
+  // ── region tool ("Ausschneiden / Kopieren"): marquee a rectangle and lift a free-
+  // floating 1:1 copy of it. In CUT mode the source area is additionally covered with
+  // the page's own background colour, so the piece really moves away; in COPY mode the
+  // original stays visible underneath. The PDF content itself is never modified. ──
   const startCut = (start: { x: number; y: number }, e: React.PointerEvent) => {
     if (!page) return;
+    // Gesture-local rect; side effects never live inside a setState updater
+    // (StrictMode double-invokes updaters — the region would be cut twice).
+    let rect: { x: number; y: number; width: number; height: number } | null = null;
     const move = (ev: PointerEvent) => {
       const p = evToView(ev);
-      const x = Math.min(start.x, p.x);
-      const y = Math.min(start.y, p.y);
+      rect = {
+        x: Math.min(start.x, p.x),
+        y: Math.min(start.y, p.y),
+        width: Math.abs(p.x - start.x),
+        height: Math.abs(p.y - start.y),
+      };
       setDraft({
         id: 'draft-cut',
         type: 'rect',
-        x,
-        y,
-        width: Math.abs(p.x - start.x),
-        height: Math.abs(p.y - start.y),
+        ...rect,
         opacity: 1,
         z: nextZ(page),
         fill: null,
@@ -1267,10 +1283,8 @@ export function PageCanvas() {
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      setDraft((d) => {
-        if (d && d.width > 4 && d.height > 4) void cutRegion(d.x, d.y, d.width, d.height);
-        return null;
-      });
+      setDraft(null);
+      if (rect && rect.width > 4 && rect.height > 4) void cutRegion(rect.x, rect.y, rect.width, rect.height);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -1404,6 +1418,44 @@ export function PageCanvas() {
       im.src = src;
     });
 
+  // Background colour around the region's border — what CUT mode paints over the
+  // source area so the lifted piece really "leaves a clean page" behind.
+  const sampleRegionBackground = (vx: number, vy: number, vw: number, vh: number): string => {
+    const canvas = canvasRef.current;
+    if (!canvas) return '#ffffff';
+    const { px, ox, oy } = sampleMap();
+    return sampleBackground(canvas, { x: vx, y: vy, width: vw, height: vh }, px, ox, oy);
+  };
+
+  // A solid-colour PNG clipped to the lasso polygon (CUT mode's cover for a freehand
+  // region). Drawn slightly past the outline so no seam of the original shows.
+  const solidPolygonPng = (pts: { x: number; y: number }[], vx: number, vy: number, vw: number, vh: number, color: string): string | null => {
+    const density = 2;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(vw * density));
+    c.height = Math.max(1, Math.round(vh * density));
+    const ctx = c.getContext('2d');
+    if (!ctx) return null;
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const px = (p.x - vx) * density;
+      const py = (p.y - vy) * density;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    try {
+      return c.toDataURL('image/png');
+    } catch {
+      return null;
+    }
+  };
+
   const cutRegionLasso = async (pts: { x: number; y: number }[]) => {
     if (!page) return;
     let minX = Infinity;
@@ -1434,8 +1486,18 @@ export function PageCanvas() {
       showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
       return;
     }
-    addElement(page.id, { id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh, opacity: 1, z: nextZ(page), src: masked, aspect: vw / vh });
+    const isCut = tool.cutAction === 'cut';
+    const els: AnyElement[] = [];
+    const zBase = nextZ(page);
+    if (isCut) {
+      const cover = solidPolygonPng(pts, vx, vy, vw, vh, sampleRegionBackground(vx, vy, vw, vh));
+      if (cover) els.push({ id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh, opacity: 1, z: zBase, src: cover, aspect: vw / vh });
+    }
+    const piece: AnyElement = { id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh, opacity: 1, z: zBase + 1, src: masked, aspect: vw / vh };
+    els.push(piece);
+    addElements(page.id, els, piece.id); // one undo step, piece selected
     setTool('select');
+    showToast(isCut ? 'Bereich ausgeschnitten – ziehe das Stück an die gewünschte Stelle' : 'Bereich kopiert – das Stück liegt über dem Original', 'success');
   };
 
   const cutRegion = async (x: number, y: number, w: number, h: number) => {
@@ -1453,18 +1515,30 @@ export function PageCanvas() {
 
     const src = (await captureRegionHiRes(vx, vy, vw, vh)) ?? captureRegionFromScreen(vx, vy, vw, vh);
     if (!src) {
-      showToast('Bereich konnte nicht dupliziert werden.', 'error');
+      showToast('Bereich konnte nicht ausgeschnitten werden.', 'error');
       return;
     }
 
-    // A free-floating, full-quality duplicate of the region. Nothing is removed from
-    // or painted over the page — the original content stays exactly as it was.
+    // A free-floating, full-quality piece of the region. The PDF content itself is
+    // never modified: CUT covers the source area with the sampled page background,
+    // COPY leaves it fully visible.
+    const isCut = tool.cutAction === 'cut';
+    const els: AnyElement[] = [];
+    const zBase = nextZ(page);
+    if (isCut) {
+      els.push({
+        id: uid('el'), type: 'rect', x: vx, y: vy, width: vw, height: vh,
+        opacity: 1, z: zBase, fill: sampleRegionBackground(vx, vy, vw, vh), stroke: null, strokeWidth: 0, radius: 0,
+      });
+    }
     const piece: AnyElement = {
       id: uid('el'), type: 'image', x: vx, y: vy, width: vw, height: vh,
-      opacity: 1, z: nextZ(page), src, aspect: vw / vh,
+      opacity: 1, z: zBase + 1, src, aspect: vw / vh,
     };
-    addElement(page.id, piece); // one undo step, piece selected, ready to drag away
+    els.push(piece);
+    addElements(page.id, els, piece.id); // one undo step, piece selected, ready to drag away
     setTool('select');
+    showToast(isCut ? 'Bereich ausgeschnitten – ziehe das Stück an die gewünschte Stelle' : 'Bereich kopiert – das Stück liegt über dem Original', 'success');
   };
 
   const startDrawing = (start: { x: number; y: number }) => {
@@ -1577,35 +1651,81 @@ export function PageCanvas() {
     };
   };
 
-  // Clicking a detected line opens its font panel (showing the real typeface, size,
-  // colour and whether it can be reused 1:1) instead of editing blindly.
-  const pickRun = (idx: number) => {
+  // Clicking a detected line opens the transient IN-PLACE editor right on top of it:
+  // the original text, pre-filled, in the line's own typeface, over a live background
+  // cover. Nothing is added to the document until the text actually changes.
+  const beginRunEdit = (idx: number, caretX: number | null) => {
     const run = runs[idx];
     if (!run) return;
-    setPickInfo(sampleRun(run));
-    setPickedRun(idx);
+    const { color, bg } = sampleRun(run);
+    setEditingId(null);
+    selectElement(null);
+    setRunEdit({ idx, color, bg, caretX });
   };
 
-  // Scan action: ARM the detected line's IDENTICAL typeface — original font 1:1 when
-  // embedded, plus the same size, BOLD / ITALIC style and ink colour — then let the user
-  // choose WHERE it lands. No field is dropped here; the next click on the page places an
-  // empty text box in exactly this font, ready to type. There is deliberately NO
-  // background cover, so the original page content underneath is never painted over.
-  const armMatchingField = (idx: number) => {
-    const run = runs[idx];
-    if (!run || !page) return;
-    const { color } = pickInfo ?? sampleRun(run);
+  // Close the transient editor. A changed text creates ONE replacing element (cover +
+  // re-drawn line on the exact original baseline) in a single history step; an
+  // unchanged text leaves document and history completely untouched, so inspecting a
+  // line never alters the file. `re` is passed explicitly (not read from state): a
+  // click on the next line may already have opened a new editor when the old one
+  // commits through its blur/unmount.
+  const finishRunEdit = (re: { idx: number; color: string; bg: string }, text: string) => {
+    setRunEdit((cur) => (cur && cur.idx === re.idx ? null : cur));
+    const run = runs[re.idx];
+    if (!page || !run || text === run.str) return;
+    const size = run.fontSize;
+    const off = (size * (SCAN_LINE_HEIGHT - 1)) / 2;
+    const lines = text.length ? text.split('\n') : [''];
+    const font = runFontString(run);
+    const width = Math.max(size * 0.6, ...lines.map((l) => measureLineWidth(l, font)));
+    const el: TextElement = {
+      id: uid('el'),
+      type: 'text',
+      // First baseline = elY + size·((lh−1)/2 + ascent) = run.y + size·ascent — the
+      // replacement sits on EXACTLY the original baseline, on screen and on export.
+      x: run.x,
+      y: run.y - off,
+      width,
+      height: lines.length * size * SCAN_LINE_HEIGHT,
+      opacity: 1,
+      z: nextZ(page),
+      text,
+      family: run.family,
+      size,
+      bold: run.bold,
+      italic: run.italic,
+      color: re.color,
+      align: 'left',
+      lineHeight: SCAN_LINE_HEIGHT,
+      coverColor: re.bg,
+      // Page-anchored: covers the WHOLE original line even when the new text is
+      // shorter, and stays put when the box is later moved or rotated.
+      coverRect: { x: run.x, y: run.y, width: Math.max(run.width, width), height: run.height },
+      replacesRun: runKey(run),
+      embeddedFontId: run.embeddedFontId,
+      fontLabel: run.fontLabel,
+    };
+    addElement(page.id, el);
+    if (!text.trim()) showToast('Zeile entfernt – ⌘Z macht es rückgängig', 'info');
+  };
+
+  // Chip action: adopt the line's typeface for NEW text elsewhere — the next click on
+  // the page places an empty field in exactly this font/size/style/colour (original
+  // font 1:1 when embedded), without covering anything.
+  const adoptRunStyle = (re: { idx: number; color: string }) => {
+    const run = runs[re.idx];
+    if (!run) return;
+    setRunEdit(null);
     setPendingTextStyle({
       family: run.family, // metric fallback when the original font can't be embedded
-      size: run.fontSize, // identical size
-      bold: run.bold, // identical weight — bold stays bold
-      italic: run.italic, // identical style — italic stays italic
-      color,
-      lineHeight: 1.15,
+      size: run.fontSize,
+      bold: run.bold,
+      italic: run.italic,
+      color: re.color,
+      lineHeight: SCAN_LINE_HEIGHT,
       embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
       fontLabel: run.fontLabel, // carry the real name so the inspector shows it
     });
-    setPickedRun(null);
     setTool('text'); // arm placement; the next click drops the field in this font
     showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
   };
@@ -1617,19 +1737,17 @@ export function PageCanvas() {
     showToast('Farbe für neuen Text übernommen', 'success');
   };
 
-  // A detected line is "consumed" once a text box has been adopted at its position,
-  // so its clickable box never reappears (and a second adopt can't stack on it).
-  const runIsTaken = useCallback(
-    (run: TextRun) =>
-      !!page &&
-      page.elements.some(
-        (e) =>
-          e.type === 'text' &&
-          Math.abs(e.x - run.x) <= 2 &&
-          Math.abs(e.y - run.y) <= Math.max(2, run.fontSize * 0.6),
-      ),
-    [page],
-  );
+  // A detected line is "consumed" once it has been rewritten in place: the element
+  // carries the line's stable identity, so its clickable box never reappears (and a
+  // second edit goes through the element itself, which re-opens its editor).
+  const takenRunKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const el of page?.elements ?? []) {
+      if (el.type === 'text' && el.replacesRun) keys.add(el.replacesRun);
+    }
+    return keys;
+  }, [page]);
+  const runIsTaken = useCallback((run: TextRun) => takenRunKeys.has(runKey(run)), [takenRunKeys]);
 
   if (!page) return <div className="canvas-area" ref={areaRef} />;
 
@@ -1654,25 +1772,30 @@ export function PageCanvas() {
           onPointerUp={loupe ? (e) => { if (e.pointerType === 'touch') setLoupe(null); } : undefined}
         >
           {sorted.map((el) => (
-            <ElementView
-              key={el.id}
-              el={el}
-              pageId={page.id}
-              scale={scale}
-              editing={editingId === el.id}
-              // Text stays clickable in scan mode so an in-place edit can be
-              // re-opened (clicking a covered line edits the existing field again).
-              interactive={activeTool === 'select' || editingId === el.id || (activeTool === 'edit-text' && el.type === 'text')}
-              editTextMode={activeTool === 'edit-text'}
-              alignBaselines={getAlignTargets(el.id)}
-              alignXs={getAlignTargetsX(el.id)}
-              onAlignGuide={setAlignGuideY}
-              onAlignGuideX={setAlignGuideX}
-              onStartEdit={() => startEditElement(el.id)}
-              onEndEdit={endTextEdit}
-              updateElement={updateElement}
-              commit={commit}
-            />
+            <Fragment key={el.id}>
+              {/* Page-anchored background cover of an in-place text replacement. It
+                  renders directly below its own text (same z slot, DOM order), never
+                  moves/rotates with the box, and mirrors the export exactly. */}
+              {el.type === 'text' && el.coverColor && !el.hidden && <CoverView el={el} scale={scale} />}
+              <ElementView
+                el={el}
+                pageId={page.id}
+                scale={scale}
+                editing={editingId === el.id}
+                // Text stays clickable in scan mode so an in-place edit can be
+                // re-opened (clicking a covered line edits the existing field again).
+                interactive={activeTool === 'select' || editingId === el.id || (activeTool === 'edit-text' && el.type === 'text')}
+                editTextMode={activeTool === 'edit-text'}
+                alignBaselines={getAlignTargets(el.id)}
+                alignXs={getAlignTargetsX(el.id)}
+                onAlignGuide={setAlignGuideY}
+                onAlignGuideX={setAlignGuideX}
+                onStartEdit={() => startEditElement(el.id)}
+                onEndEdit={endTextEdit}
+                updateElement={updateElement}
+                commit={commit}
+              />
+            </Fragment>
           ))}
 
           {draft && <DraftView el={draft} scale={scale} />}
@@ -1699,26 +1822,29 @@ export function PageCanvas() {
             <>
               {runs.length > 0 && <div key={scanId} className="scan-sweep" />}
               {runs.map((run, i) => {
-                if (runIsTaken(run)) return null;
-                return <RunBox key={i} run={run} scale={scale} active={pickedRun === i} onPick={() => pickRun(i)} />;
+                if (runIsTaken(run) || runEdit?.idx === i) return null;
+                return <RunBox key={i} run={run} scale={scale} onPick={(vx) => beginRunEdit(i, vx)} />;
               })}
+              {/* The transient in-place editor over the picked line. Keyed by line, so
+                  clicking the next line remounts it cleanly (the old instance commits
+                  through its blur/unmount, see RunEditor). */}
+              {runEdit && runs[runEdit.idx] && (
+                <RunEditor
+                  key={`${scanId}:${runEdit.idx}`}
+                  run={runs[runEdit.idx]}
+                  scale={scale}
+                  color={runEdit.color}
+                  bg={runEdit.bg}
+                  caretX={runEdit.caretX}
+                  onCommit={(text) => finishRunEdit(runEdit, text)}
+                  onCancel={() => setRunEdit((cur) => (cur && cur.idx === runEdit.idx ? null : cur))}
+                  onAdoptStyle={() => adoptRunStyle(runEdit)}
+                  onUseColor={useDetectedColor}
+                />
+              )}
             </>
           )}
         </div>
-
-        {/* Font panel for the picked line — sits above the overlay so it isn't clipped. */}
-        {activeTool === 'edit-text' && pickedRun != null && runs[pickedRun] && (
-          <FontInfoPanel
-            run={runs[pickedRun]}
-            scale={scale}
-            color={pickInfo?.color ?? '#111111'}
-            stageW={view.width * scale}
-            stageH={view.height * scale}
-            onInsert={() => armMatchingField(pickedRun)}
-            onUseColor={useDetectedColor}
-            onClose={() => setPickedRun(null)}
-          />
-        )}
       </div>
 
       {/* Background-brush magnifier: a pixel-zoomed view of the spot under the cursor with
@@ -1913,12 +2039,11 @@ function DraftView({ el, scale }: { el: AnyElement; scale: number }) {
 }
 
 /**
- * A clickable box over a detected line of existing PDF text. Clicking it calls
- * `pickRun`, which opens the font panel for the line (real typeface, size, style,
- * colour and whether it is embedded). The box previews the line in its own font and
- * shows the detected point size on hover.
+ * A clickable box over a detected line of existing PDF text. Clicking it starts
+ * editing the line IN PLACE (see RunEditor); the click position becomes the caret.
+ * The box previews the line in its own font and shows the point size on hover.
  */
-function RunBox({ run, scale, active, onPick }: { run: TextRun; scale: number; active: boolean; onPick: () => void }) {
+function RunBox({ run, scale, onPick }: { run: TextRun; scale: number; onPick: (caretVx: number) => void }) {
   const box: React.CSSProperties = {
     left: run.x * scale,
     top: run.y * scale,
@@ -1929,101 +2054,261 @@ function RunBox({ run, scale, active, onPick }: { run: TextRun; scale: number; a
   };
   return (
     <div
-      className={`run-box ${active ? 'active' : ''}`}
+      className="run-box"
       style={box}
       onPointerDown={(e) => {
         // preventDefault stops the browser's default focus-on-mousedown, which would
-        // otherwise immediately blur an editor we open right after.
+        // otherwise immediately blur the editor we open right after.
         e.preventDefault();
         e.stopPropagation();
-        onPick();
+        const rect = e.currentTarget.getBoundingClientRect();
+        onPick(run.x + (e.clientX - rect.left) / scale);
       }}
-      title={`„${run.str}“ · ${Math.round(run.fontSize)} pt · klicken für Schrift-Infos`}
+      title={`„${run.str}“ · ${Math.round(run.fontSize)} pt · klicken zum Bearbeiten`}
     >
       <span className="run-tag">{Math.round(run.fontSize)}</span>
     </div>
   );
 }
 
+/** Stable identity of a scanned line across re-scans (position + content). */
+function runKey(run: TextRun): string {
+  return `${Math.round(run.x * 4)}:${Math.round(run.y * 4)}:${run.str}`;
+}
+
+/** CSS shorthand font for measuring a run's text (canvas 2D), at scale 1 (points). */
+function runFontString(run: TextRun): string {
+  const face = textFaceCss(run.family, run.embeddedFontId, run.bold, run.italic);
+  return `${face.fontStyle} ${face.fontWeight} ${run.fontSize}px ${face.fontFamily}`;
+}
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+/** Width of one line of text in view-points, measured with the given CSS font. */
+function measureLineWidth(line: string, font: string): number {
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  if (!measureCtx) return line.length * 6;
+  measureCtx.font = font;
+  return measureCtx.measureText(line).width;
+}
+
+/** Caret index whose prefix width is closest to `x` (view-points from the line start). */
+function caretIndexAtX(text: string, x: number, font: string): number {
+  const line = text.split('\n')[0];
+  if (x <= 0) return 0;
+  let prev = 0;
+  for (let i = 1; i <= line.length; i++) {
+    const w = measureLineWidth(line.slice(0, i), font);
+    if (w >= x) return x - prev < w - x ? i - 1 : i;
+    prev = w;
+  }
+  return line.length;
+}
+
 /**
- * Panel shown when a scanned line is clicked. It reveals the line's REAL typeface,
- * size, style and colour, and whether the PDF embeds the font (so it can be reused
- * 1:1). "Originalschrift übernehmen" drops a text box in exactly that font.
+ * Page-anchored background cover of an in-place text replacement: the sampled page
+ * colour over the ORIGINAL line's region, slightly inflated by the shared insets so
+ * anti-aliased glyph fringes never peek out. Deliberately independent of the text
+ * box: moving, shrinking or rotating the replacement never uncovers the original.
+ * Mirrors the bake layer's cover exactly (same rect, same insets).
  */
-function FontInfoPanel({
+function CoverView({ el, scale }: { el: TextElement; scale: number }) {
+  const r = el.coverRect ?? { x: el.x, y: el.y, width: el.width, height: el.height };
+  const pad = coverInsets(el.size);
+  return (
+    <div
+      className="text-cover"
+      style={{
+        left: (r.x - pad.x) * scale,
+        top: (r.y - pad.y) * scale,
+        width: (r.width + pad.x * 2) * scale,
+        height: (r.height + pad.y * 2) * scale,
+        background: el.coverColor,
+        opacity: el.opacity,
+      }}
+    />
+  );
+}
+
+/**
+ * Transient in-place editor for a scanned line (Acrobat-style text editing): a
+ * textarea laid EXACTLY over the original glyphs, in the line's own typeface (the
+ * embedded original when captured), on top of a live background cover sampled from
+ * the page. A compact chip above the line shows the detected font and offers the
+ * secondary actions. Nothing touches the document until the text actually changes —
+ * closing without a change leaves no trace and no history entry.
+ */
+function RunEditor({
   run,
   scale,
   color,
-  stageW,
-  stageH,
-  onInsert,
+  bg,
+  caretX,
+  onCommit,
+  onCancel,
+  onAdoptStyle,
   onUseColor,
-  onClose,
 }: {
   run: TextRun;
   scale: number;
   color: string;
-  stageW: number;
-  stageH: number;
-  onInsert: () => void;
+  bg: string;
+  caretX: number | null;
+  onCommit: (text: string) => void;
+  onCancel: () => void;
+  onAdoptStyle: () => void;
   onUseColor: (color: string) => void;
-  onClose: () => void;
 }) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const doneRef = useRef(false);
+  const size = run.fontSize;
+  const off = (size * (SCAN_LINE_HEIGHT - 1)) / 2;
+  const pad = coverInsets(size);
   const face = textFaceCss(run.family, run.embeddedFontId, run.bold, run.italic);
-  const width = 268;
-  const left = Math.max(4, Math.min(run.x * scale, stageW - width - 4));
-  const estH = 256;
-  const below = (run.y + run.height) * scale + 8;
-  const top = below + estH > stageH ? Math.max(4, run.y * scale - estH - 8) : below;
+  const [content, setContent] = useState<{ w: number; h: number }>({
+    w: Math.max(run.width, size * 0.6),
+    h: size * SCAN_LINE_HEIGHT,
+  });
+
+  const finish = (cancel: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    if (cancel) onCancel();
+    else onCommit(taRef.current?.value ?? run.str);
+  };
+  // Unmount safety net: switching tools or pages unmounts this editor without a blur,
+  // and typed text must still be committed instead of silently dropped. It fires ONLY
+  // when the text actually changed — crucial not just semantically but technically:
+  // React's StrictMode dev remount runs this cleanup once right after mount, and an
+  // unconditional commit would close the editor the instant it opens.
+  const finishRef = useRef(() => {});
+  useEffect(() => {
+    finishRef.current = () => {
+      const val = taRef.current?.value;
+      if (doneRef.current || val == null || val === run.str) return;
+      doneRef.current = true;
+      onCommit(val);
+    };
+  });
+  useEffect(() => () => finishRef.current(), []);
+
+  const autoFit = (ta: HTMLTextAreaElement) => {
+    // Collapse before reading so scrollWidth/Height report the pure content size
+    // (they never shrink below the current layout box otherwise). The previous
+    // inline size is restored verbatim — React only re-applies its style prop when
+    // the value changes, so blanking it here could leave the box collapsed.
+    const pw = ta.style.width;
+    const ph = ta.style.height;
+    ta.style.width = '0px';
+    ta.style.height = '0px';
+    const w = ta.scrollWidth;
+    const h = ta.scrollHeight;
+    ta.style.width = pw;
+    ta.style.height = ph;
+    setContent({
+      w: Math.max((w + 2) / scale, size * 0.6),
+      h: Math.max(h / scale, size * SCAN_LINE_HEIGHT),
+    });
+  };
+
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.focus();
+    autoFit(ta);
+    // Put the caret where the user clicked in the line, measured with the same face
+    // the line renders in; fall back to the end of the text.
+    const idx = caretX != null ? caretIndexAtX(ta.value, caretX - run.x, runFontString(run)) : ta.value.length;
+    ta.setSelectionRange(idx, idx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Chip above the line; below it when the line sits at the very top of the page.
+  const chipBelow = (run.y - off) * scale < 44;
   const styleBits = [run.bold ? 'Fett' : null, run.italic ? 'Kursiv' : null].filter(Boolean).join(' · ');
-  const sample = (run.str || 'Aa Bb Cc 0123').trim().slice(0, 28);
 
   return (
-    <div className="font-panel" style={{ left, top, width }} onPointerDown={(e) => e.stopPropagation()}>
-      <div className="font-panel-head">
-        <Type size={14} />
-        <span>Erkannte Schrift</span>
-        <button className="font-panel-x" onClick={onClose} title="Schließen">
-          <X size={14} />
-        </button>
-      </div>
-      <div className="font-panel-name" style={{ fontFamily: face.fontFamily }}>
-        {run.fontLabel || 'Unbekannt'}
-      </div>
-      {/* The detected line drawn in its OWN typeface — an immediate, honest preview. */}
-      <div className="font-panel-preview" style={{ ...face, color }}>
-        {sample}
-      </div>
-      <div className={`font-panel-badge ${run.embedded === true ? 'ok' : run.embedded === false ? 'warn' : 'neutral'}`}>
-        {run.embedded === true ? (
-          <>
-            <Check size={13} /> Originalschrift verfügbar – exakt nutzbar
-          </>
-        ) : run.embedded === false ? (
-          <>nicht eingebettet – ähnlichste Schrift wird genutzt</>
-        ) : (
-          <>Schrift wird geprüft …</>
+    <div className="run-editor" style={{ left: run.x * scale, top: (run.y - off) * scale }}>
+      {/* Live cover: hides the original glyphs while typing, exactly like the result. */}
+      <div
+        className="run-editor-cover"
+        style={{
+          left: -pad.x * scale,
+          top: (off - pad.y) * scale,
+          width: (Math.max(run.width, content.w) + pad.x * 2) * scale,
+          height: (run.height + pad.y * 2) * scale,
+          background: bg,
+        }}
+      />
+      <textarea
+        ref={taRef}
+        className="run-editor-input"
+        wrap="off"
+        spellCheck={false}
+        defaultValue={run.str}
+        style={{
+          ...face,
+          fontSize: size * scale,
+          lineHeight: SCAN_LINE_HEIGHT,
+          color,
+          width: content.w * scale + 4,
+          height: content.h * scale,
+        }}
+        onChange={(e) => autoFit(e.currentTarget)}
+        onBlur={() => finish(false)}
+        onPointerDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Enter adds a line; Esc (or clicking elsewhere) finishes the edit.
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            finish(false);
+          }
+        }}
+      />
+      {/* Compact info chip: detected typeface, size/style, embedded badge + actions. */}
+      <div
+        className={`run-editor-chip ${chipBelow ? 'below' : ''}`}
+        style={chipBelow ? { top: (off + run.height + pad.y) * scale + 6 } : undefined}
+        onPointerDown={(e) => {
+          // Keep focus in the textarea so chip clicks never blur-commit halfway.
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      >
+        <span className="run-chip-name" title={`Erkannte Schrift: ${run.fontLabel || 'Unbekannt'}`}>
+          {run.fontLabel || 'Unbekannt'}
+        </span>
+        <span className="run-chip-meta">
+          {Math.round(size)} pt{styleBits ? ` · ${styleBits}` : ''}
+        </span>
+        {run.embedded === true && (
+          <span className="run-chip-badge" title="Originalschrift eingebettet – wird 1:1 wiederverwendet">
+            <Check size={12} />
+          </span>
         )}
-      </div>
-      <div className="font-panel-meta">
-        <span>{Math.round(run.fontSize)} pt</span>
-        {styleBits && <span>{styleBits}</span>}
         <button
-          className="font-panel-swatch"
+          className="run-chip-swatch"
           style={{ background: color }}
           title="Diese Schriftfarbe für neuen Text übernehmen"
           onClick={() => onUseColor(color)}
         />
-      </div>
-      <div className="font-panel-actions">
+        <span className="run-chip-sep" />
         <button
-          className="btn primary"
-          onClick={onInsert}
-          title="Diese Schrift übernehmen – anschliessend auf die Stelle klicken, an der das Textfeld eingefügt werden soll (ohne Hintergrund-Abdeckung)"
+          className="run-chip-btn"
+          title="In dieser Schrift an anderer Stelle schreiben (ohne Abdeckung)"
+          onClick={() => {
+            doneRef.current = true;
+            onAdoptStyle();
+          }}
         >
-          <Plus size={14} /> In dieser Schrift schreiben
+          <Type size={13} />
         </button>
-        <p className="font-panel-foot">Danach auf die gewünschte Stelle klicken · ohne Abdeckung</p>
+        <button className="run-chip-btn" title="Abbrechen – Änderungen verwerfen" onClick={() => finish(true)}>
+          <X size={13} />
+        </button>
+        <button className="run-chip-btn primary" title="Fertig (Esc)" onClick={() => finish(false)}>
+          <Check size={13} />
+        </button>
       </div>
     </div>
   );

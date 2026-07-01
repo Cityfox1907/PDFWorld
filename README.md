@@ -26,27 +26,29 @@ die bestehenden Seiten eingezeichnet.
   duplizieren, löschen** oder per Drag & Drop **verschieben**
 
 ### 2. Bearbeitung
-- **Text scannen & bearbeiten** – ein Scan erkennt jede Textzeile und bündelt sie
-  zu klickbaren Blöcken. Beim Antippen zeigt ein **Schrift-Panel** den echten
-  Schriftnamen, eine **Vorschau in genau dieser Schrift**, Grösse, Stil und Farbe
-  der Zeile und ob die **Originalschrift** eingebettet (und damit 1:1 nutzbar) ist.
+- **Text scannen & direkt bearbeiten (in-place)** – ein Scan erkennt jede Textzeile
+  und markiert sie als klickbares Feld. **Ein Klick auf die Zeile öffnet sie sofort
+  zum Umschreiben** – wie in Adobe Acrobat: der Originaltext steht vorbefüllt im
+  Editor, in **derselben Schrift, Grösse, Farbe und auf exakt derselben Grundlinie**;
+  die Einfügemarke landet dort, wo geklickt wurde. Das Original darunter wird mit der
+  **automatisch abgetasteten Hintergrundfarbe** unsichtbar abgedeckt – die Abdeckung
+  ist **an der Seite verankert**, deckt also auch dann noch die ganze Originalzeile,
+  wenn der neue Text kürzer ist oder später verschoben/gedreht wird. Ein kompakter
+  **Chip über der Zeile** zeigt den echten Schriftnamen, Grösse/Stil, ob die
+  **Originalschrift eingebettet** ist (dann wird sie **1:1 wiederverwendet**, auf dem
+  Bildschirm und im Export) und die erkannte Schriftfarbe. **Schliessen ohne Änderung
+  hinterlässt keinerlei Spur** im Dokument – Zeilen lassen sich also gefahrlos
+  inspizieren. Ein erneuter Klick auf eine umgeschriebene Zeile öffnet sie wieder.
   Die Erkennung greift auf eine **grosse Schrift-Datenbank** (über 150 Faces) zu und
   säubert run-together-Namen aus dem PDF („PaalalabasDisplayCondensedBETA“ →
   „Paalalabas Display Condensed BETA“). Bekannte Schriften (Arial, Times New Roman,
   Roboto …) werden **exakt benannt**, eingebettete Originale mit ihrem echten Namen
   gezeigt – lässt sich eine Schrift weder zuordnen noch einbetten, steht ehrlich
   **„Unbekannt“**, damit angezeigter Name und tatsächlich genutzte Schrift nie
-  auseinanderfallen. Mit
-  **„In dieser Schrift schreiben“** wird die Schrift **übernommen** – der **nächste
-  Klick auf die Seite** setzt dort ein leeres Textfeld in **exakt dieser Schrift**
-  (gleiche Grösse, gleicher Stil mit **Fett/Kursiv**, gleiche Farbe), **ohne
-  Hintergrund-Abdeckung**, sodass das Original darunter unangetastet bleibt. So
-  wählst du frei, **wohin** der Text kommt, statt ihn fest auf die Zeile zu setzen.
-  Das übernommene Original wird dabei **glyphengetreu** dargestellt – ohne
-  künstliches Schräg-/Fettstellen über eine bereits kursive/fette Originaldatei –,
-  und das **Schrift-Feld rechts zeigt denselben echten Schriftnamen** wie das
-  ausgewählte Textfeld: angezeigte Schrift, Text auf der Seite und Export sind
-  **immer deckungsgleich**. Die Metrik-Familie (Serif/Sans/Mono) wird aus dem
+  auseinanderfallen. Über das **T-Symbol im Chip** (oder den Knopf im Inspector
+  jedes Textfelds) lässt sich die Schrift zusätzlich **für neuen Text übernehmen** –
+  der nächste Klick auf die Seite setzt dort ein leeres Textfeld in exakt dieser
+  Schrift, ohne Abdeckung. Die Metrik-Familie (Serif/Sans/Mono) wird aus dem
   **echten Schriftnamen** abgeleitet, nicht aus dem generischen Notnamen von pdf.js –
   so wird z. B. eine eingebettete **DejaVu-Serif**-Zeile nie als Helvetica geführt
 - **Mehrfachauswahl** – mit dem Auswählen-Werkzeug einen **Rahmen aufziehen**, um
@@ -63,13 +65,16 @@ die bestehenden Seiten eingezeichnet.
   und Export deckungsgleich sind
 - **Drehen** – jedes Element (Textfeld, Form, Bild …) lässt sich per Regler frei
   drehen; die Drehung wird verlustfrei exakt so in die Seite gezeichnet
-- **Bereich ausschneiden / duplizieren** – einen Bereich als **Rechteck** aufziehen
+- **Bereich ausschneiden / kopieren** – einen Bereich als **Rechteck** aufziehen
   oder mit gedrückter Maus **freihändig umfahren (Lasso)**: er wird in **voller
-  Originalqualität (1:1)** dupliziert und – beim Lasso entlang der gezogenen Linie
+  Originalqualität (1:1)** herausgelöst und – beim Lasso entlang der gezogenen Linie
   zugeschnitten – als frei verschiebbares Stück eingefügt (sofort angewählt). Der
-  Bereich wird dafür direkt aus dem PDF in Druckdichte neu gerastert – **das Original
-  bleibt vollständig erhalten**. Stücke lassen sich verschieben, **duplizieren**
-  (⌘/Strg + D) und **kopieren/einfügen** (⌘/Strg + C · V)
+  Bereich wird dafür direkt aus dem PDF in Druckdichte neu gerastert. Zwei Modi:
+  **Ausschneiden** (Standard) deckt die Ursprungsstelle mit der **abgetasteten
+  Seitenfarbe** ab, sodass das Stück wirklich „wegbewegt“ wird; **Kopieren** lässt
+  das Original sichtbar. Die PDF-Inhalte selbst bleiben in beiden Modi verlustfrei
+  erhalten. Stücke lassen sich verschieben, **duplizieren** (⌘/Strg + D) und
+  **kopieren/einfügen** (⌘/Strg + C · V)
 - **Sperren** – ein Element gegen versehentliches Verschieben sichern; ein dezentes
   Schloss-Symbol oben rechts erscheint kurz beim Anwählen zum Ent-/Sperren
 - **Direkt tippen** – ein neues Textfeld landet genau auf der angeklickten Linie und

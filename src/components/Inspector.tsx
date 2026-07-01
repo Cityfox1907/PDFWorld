@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore, type ToolId, type ToolDefaults } from '../state/store';
 import type { AnyElement, ElementPatch, TextElement, ShapeElement, CalloutElement, ImageElement, InkElement, ShapeKind } from '../lib/pdf';
-import { isStrokeOnlyShape, embeddedFontFamily } from '../lib/pdf';
-import { uid } from '../lib/utils/id';
+import { isStrokeOnlyShape, embeddedFontFamily, fontCapabilities } from '../lib/pdf';
 import { inkDashArray } from '../lib/utils/ink';
 import { FontPicker } from './FontPicker';
 import { ColorPicker } from './ColorPicker';
@@ -68,6 +67,55 @@ function Row({ children }: { children: React.ReactNode }) {
   return <div className="insp-row">{children}</div>;
 }
 
+/**
+ * Numeric field for element properties. Two guarantees the bare <input> lacks:
+ * typed values are CLAMPED to [min, max] (HTML min/max are advisory for typing),
+ * and a whole focus session records exactly ONE history step — the snapshot is
+ * taken before the first change, not once per keystroke.
+ */
+function NumField({
+  value,
+  min,
+  max,
+  step,
+  onValue,
+  onBeforeChange,
+  title,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onValue: (n: number) => void;
+  onBeforeChange: () => void;
+  title?: string;
+}) {
+  const touched = useRef(false);
+  return (
+    <input
+      className="field field-sm"
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      title={title}
+      onFocus={() => {
+        touched.current = false;
+      }}
+      onChange={(e) => {
+        const n = Number(e.target.value);
+        if (e.target.value === '' || Number.isNaN(n)) return;
+        if (!touched.current) {
+          touched.current = true;
+          onBeforeChange();
+        }
+        onValue(Math.min(max, Math.max(min, n)));
+      }}
+    />
+  );
+}
+
 /** A live preview of the current pen/marker stroke. */
 function StrokePreview({ color, width, opacity, dash, marker }: { color: string; width: number; opacity: number; dash: ToolDefaults['drawDash']; marker: boolean }) {
   const w = Math.min(Math.max(width, 1), 14);
@@ -116,10 +164,10 @@ function Header({ icon: Icon, title, tip }: { icon: LucideIcon; title: string; t
 
 const TOOL_META: Record<ToolId, { icon: LucideIcon; title: string; tip?: string }> = {
   select: { icon: MousePointer2, title: 'Auswählen', tip: 'Element anklicken, um es zu bearbeiten. Mit den Pfeiltasten verschiebst du es pixelgenau (Shift = 10 px).' },
-  'edit-text': { icon: ScanText, title: 'Text scannen', tip: 'Auf eine erkannte Zeile klicken, ihre Schrift übernehmen und anschliessend an die gewünschte Stelle klicken, um in genau dieser Schrift zu schreiben.' },
+  'edit-text': { icon: ScanText, title: 'Text scannen & bearbeiten', tip: 'Auf eine erkannte Zeile klicken und den Text direkt an Ort und Stelle umschreiben — in derselben Schrift, Grösse und Farbe. Das Original wird dabei unsichtbar abgedeckt.' },
   text: { icon: Type, title: 'Text einfügen', tip: 'Auf die Seite klicken, um ein Textfeld einzufügen. Es wächst beim Tippen mit.' },
   callout: { icon: MessageSquare, title: 'Sprechblase', tip: 'Auf die Stelle klicken, auf die die Sprechblase zeigen soll — dann direkt lostippen.' },
-  cut: { icon: Scissors, title: 'Bereich ausschneiden', tip: 'Rechteck aufziehen oder mit gedrückter Maus einen freien Bereich umfahren — er wird in voller Qualität (1:1) als frei verschiebbares Stück herausgelöst. Das Original bleibt erhalten.' },
+  cut: { icon: Scissors, title: 'Bereich ausschneiden', tip: 'Rechteck aufziehen oder mit gedrückter Maus einen freien Bereich umfahren — er wird in voller Qualität (1:1) als frei verschiebbares Stück herausgelöst. „Ausschneiden“ deckt die Ursprungsstelle mit der Seitenfarbe ab, „Kopieren“ lässt das Original sichtbar.' },
   brush: { icon: Paintbrush, title: 'Hintergrund-Pinsel' },
   highlight: { icon: Highlighter, title: 'Markieren' },
   draw: { icon: Pencil, title: 'Zeichnen' },
@@ -173,20 +221,22 @@ export function Inspector() {
   const deleteElement = useStore((s) => s.deleteElement);
   const deleteElements = useStore((s) => s.deleteElements);
   const duplicateElement = useStore((s) => s.duplicateElement);
-  const addElements = useStore((s) => s.addElements);
-  const selectElements = useStore((s) => s.selectElements);
   const reorderElement = useStore((s) => s.reorderElement);
   const commit = useStore((s) => s.commit);
   const tool = useStore((s) => s.tool);
   const setToolDefaults = useStore((s) => s.setToolDefaults);
 
+  const duplicateElements = useStore((s) => s.duplicateElements);
   const page = pages.find((p) => p.id === currentPageId);
   const el = page?.elements.find((e) => e.id === selectedId) ?? null;
 
   const set = (patch: ElementPatch, doCommit = true) => {
     if (!page || !el) return;
-    updateElement(page.id, el.id, patch);
+    // commit() snapshots the CURRENT state, so it must run BEFORE the change —
+    // committing afterwards would record the already-changed state, making the
+    // first undo a visible no-op and losing the previous value for good.
     if (doCommit) commit();
+    updateElement(page.id, el.id, patch);
   };
 
   // When several elements are selected (marquee / shift-click) show a compact group
@@ -195,12 +245,7 @@ export function Inspector() {
   if (page && selectedIds.length > 1) {
     const chosen = page.elements.filter((e) => selectedIds.includes(e.id));
     if (chosen.length > 1) {
-      const duplicateAll = () => {
-        const copies = chosen.map((e) => ({ ...structuredClone(e), id: uid('el'), x: e.x + 12, y: e.y + 12, locked: false } as AnyElement));
-        const ids = copies.map((c) => c.id);
-        addElements(page.id, copies, ids[ids.length - 1]);
-        selectElements(ids);
-      };
+      const duplicateAll = () => duplicateElements(page.id, selectedIds);
       return (
         <aside className="inspector">
           <Header icon={MousePointer2} title={`${chosen.length} Elemente`} />
@@ -235,17 +280,17 @@ export function Inspector() {
     return (
       <aside className="inspector">
         <Header icon={icon} title={title} />
-        {el.type === 'text' && <TextProps el={el} set={set} />}
-        {el.type === 'rect' && <RectEllipseProps el={el} set={set} radius />}
-        {el.type === 'ellipse' && <RectEllipseProps el={el} set={set} />}
-        {el.type === 'shape' && <VectorShapeProps el={el} set={set} />}
-        {el.type === 'callout' && <CalloutProps el={el} set={set} />}
-        {(el.type === 'image' || el.type === 'signature') && <ImageProps el={el} set={set} />}
+        {el.type === 'text' && <TextProps el={el} set={set} commit={commit} />}
+        {el.type === 'rect' && <RectEllipseProps el={el} set={set} commit={commit} radius />}
+        {el.type === 'ellipse' && <RectEllipseProps el={el} set={set} commit={commit} />}
+        {el.type === 'shape' && <VectorShapeProps el={el} set={set} commit={commit} />}
+        {el.type === 'callout' && <CalloutProps el={el} set={set} commit={commit} />}
+        {(el.type === 'image' || el.type === 'signature') && <ImageProps el={el} set={set} commit={commit} />}
         {el.type === 'highlight' && (
           <Group title="Markierung">
             <Row>
               <label>Farbe</label>
-              <ColorPicker title="Markierungsfarbe" value={el.color} onChange={(c) => set({ color: c })} />
+              <ColorPicker title="Markierungsfarbe" value={el.color} onChange={(c) => set({ color: c }, false)} onBeforeChange={commit} />
             </Row>
           </Group>
         )}
@@ -260,21 +305,14 @@ export function Inspector() {
               max={180}
               step={1}
               value={Math.round(el.rotation ?? 0)}
+              // ONE history step per drag: snapshot before the gesture starts.
+              onPointerDown={commit}
               onChange={(e) => set({ rotation: Number(e.target.value) }, false)}
-              onMouseUp={commit}
-              onTouchEnd={commit}
             />
             <span className="insp-val">{Math.round(el.rotation ?? 0)}°</span>
           </Row>
           <Row>
-            <input
-              className="field field-sm"
-              type="number"
-              min={-180}
-              max={180}
-              value={Math.round(el.rotation ?? 0)}
-              onChange={(e) => set({ rotation: Number(e.target.value) })}
-            />
+            <NumField value={Math.round(el.rotation ?? 0)} min={-180} max={180} onValue={(n) => set({ rotation: n }, false)} onBeforeChange={commit} />
             <button className="btn ghost" onClick={() => set({ rotation: 0 })}>
               Zurücksetzen
             </button>
@@ -472,6 +510,18 @@ function ToolSettings({
     return (
       <Group>
         <Row>
+          <label>Aktion</label>
+          <div className="seg insp-seg">
+            <button className={`seg-btn ${tool.cutAction === 'cut' ? 'active' : ''}`} onClick={() => setToolDefaults({ cutAction: 'cut' })} title="Der Bereich wird herausgelöst; die Ursprungsstelle wird mit der Seitenfarbe abgedeckt.">
+              Ausschneiden
+            </button>
+            <button className={`seg-btn ${tool.cutAction === 'copy' ? 'active' : ''}`} onClick={() => setToolDefaults({ cutAction: 'copy' })} title="Der Bereich wird dupliziert; das Original bleibt sichtbar.">
+              Kopieren
+            </button>
+          </div>
+        </Row>
+        <Row>
+          <label>Form</label>
           <div className="seg insp-seg">
             <button className={`seg-btn ${tool.cutMode === 'rect' ? 'active' : ''}`} onClick={() => setToolDefaults({ cutMode: 'rect' })}>
               Rechteck
@@ -483,8 +533,8 @@ function ToolSettings({
         </Row>
         <p className="insp-tip" style={{ marginTop: 0 }}>
           {tool.cutMode === 'rect'
-            ? 'Rechteck aufziehen — der Bereich wird 1:1 dupliziert und frei verschiebbar.'
-            : 'Mit gedrückter Maus den gewünschten Bereich umfahren — er wird entlang deiner Linie ausgeschnitten.'}
+            ? 'Rechteck über den gewünschten Bereich aufziehen — das Stück wird in voller Qualität (1:1) herausgelöst und ist sofort frei verschiebbar.'
+            : 'Mit gedrückter Maus den gewünschten Bereich umfahren — das Stück wird entlang deiner Linie herausgelöst und ist sofort frei verschiebbar.'}
         </p>
       </Group>
     );
@@ -529,12 +579,47 @@ function ToolSettings({
     );
   }
 
-  // select / edit-text / redact: no controls — the header (with its info toggle)
-  // already says everything that used to be a wall of text.
+  // Tools without settings still explain themselves: a short, always-visible guide
+  // beats an empty panel — especially for the scan tool's three-step flow.
+  if (activeTool === 'edit-text') {
+    return (
+      <Group>
+        <ol className="insp-steps">
+          <li>Die Seite wird gescannt – jede Textzeile wird als blaues Feld markiert.</li>
+          <li>Zeile anklicken und den Text direkt umschreiben – gleiche Schrift, Grösse und Farbe, das Original wird unsichtbar abgedeckt.</li>
+          <li>Esc oder Klick daneben schliesst ab. Ein erneuter Klick auf die Zeile bearbeitet sie wieder.</li>
+        </ol>
+        <p className="insp-tip" style={{ marginTop: 8 }}>
+          Über das <strong>T</strong>-Symbol im Zeilen-Chip lässt sich die erkannte Schrift auch für neuen Text an anderer Stelle übernehmen.
+        </p>
+      </Group>
+    );
+  }
+  if (activeTool === 'select') {
+    return (
+      <Group>
+        <p className="insp-tip" style={{ marginTop: 0 }}>
+          Element anklicken, um es zu bearbeiten. Rahmen aufziehen für Mehrfachauswahl, Shift-Klick fügt hinzu. Pfeiltasten verschieben pixelgenau (Shift = 10 px), Doppelklick bearbeitet Text.
+        </p>
+      </Group>
+    );
+  }
+  if (activeTool === 'redact') {
+    return (
+      <Group>
+        <p className="insp-tip" style={{ marginTop: 0 }}>
+          Bereich aufziehen, um ihn mit einem schwarzen Balken abzudecken. Hinweis: Der Text darunter bleibt technisch im PDF erhalten – dies ist keine sicherheitskritische Schwärzung.
+        </p>
+      </Group>
+    );
+  }
   return null;
 }
 
-function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => void }) {
+function TextProps({ el, set, commit }: { el: TextElement; set: (p: ElementPatch, doCommit?: boolean) => void; commit: () => void }) {
+  const setPendingTextStyle = useStore((s) => s.setPendingTextStyle);
+  const setTool = useStore((s) => s.setTool);
+  const showToast = useStore((s) => s.showToast);
   // When this field carries a captured ORIGINAL typeface (scan editor), the font control
   // shows that real font — its true name and a preview in the actual face — instead of
   // the metric fallback family, so the inspector and the text on the page always agree.
@@ -542,6 +627,20 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
   // original-font binding and lets the chosen family/style take effect.
   const originalCss = el.embeddedFontId ? embeddedFontFamily(el.embeddedFontId) : undefined;
   const showsOriginal = !!el.embeddedFontId && !!el.fontLabel;
+  const writeInThisFont = () => {
+    setPendingTextStyle({
+      family: el.family,
+      size: el.size,
+      bold: el.bold,
+      italic: el.italic,
+      color: el.color,
+      lineHeight: el.lineHeight,
+      embeddedFontId: el.embeddedFontId,
+      fontLabel: el.fontLabel,
+    });
+    setTool('text');
+    showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
+  };
   return (
     <Group title="Schrift">
       {el.embeddedFontId && (
@@ -556,25 +655,34 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
         />
       </Row>
       <Row>
-        <input
-          className="field field-sm"
-          type="number"
+        <NumField
+          value={el.size}
           min={4}
           max={400}
-          value={el.size}
+          title="Schriftgrösse (pt)"
           // Grow the box together with the type: the field never clips its text when
           // the size is increased (width & height scale linearly with the font size).
-          onChange={(e) => {
-            const size = Math.max(1, Number(e.target.value) || el.size);
+          onValue={(size) => {
             const ratio = size / (el.size || size);
-            set({ size, width: el.width * ratio, height: el.height * ratio });
+            set({ size, width: el.width * ratio, height: el.height * ratio }, false);
           }}
+          onBeforeChange={commit}
         />
-        <ColorPicker title="Schriftfarbe" value={el.color} onChange={(c) => set({ color: c })} />
-        <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold, embeddedFontId: undefined, fontLabel: undefined })} title="Fett">
+        <ColorPicker title="Schriftfarbe" value={el.color} onChange={(c) => set({ color: c }, false)} onBeforeChange={commit} />
+        <button
+          className={`btn icon ${el.bold ? 'primary' : 'ghost'}`}
+          disabled={!el.bold && !fontCapabilities(el.family).bold}
+          onClick={() => set({ bold: !el.bold, embeddedFontId: undefined, fontLabel: undefined })}
+          title={!el.bold && !fontCapabilities(el.family).bold ? 'Diese Schrift bietet keinen echten Fettschnitt' : 'Fett'}
+        >
           <Bold size={15} />
         </button>
-        <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic, embeddedFontId: undefined, fontLabel: undefined })} title="Kursiv">
+        <button
+          className={`btn icon ${el.italic ? 'primary' : 'ghost'}`}
+          disabled={!el.italic && !fontCapabilities(el.family).italic}
+          onClick={() => set({ italic: !el.italic, embeddedFontId: undefined, fontLabel: undefined })}
+          title={!el.italic && !fontCapabilities(el.family).italic ? 'Diese Schrift bietet keinen echten Kursivschnitt' : 'Kursiv'}
+        >
           <Italic size={15} />
         </button>
       </Row>
@@ -607,10 +715,17 @@ function TextProps({ el, set }: { el: TextElement; set: (p: ElementPatch) => voi
       </Row>
       {el.coverColor && (
         <Row>
-          <label>Hintergrund</label>
-          <ColorPicker title="Hintergrund-Abdeckung" value={el.coverColor} onChange={(c) => set({ coverColor: c })} />
+          <label>Abdeckung</label>
+          <ColorPicker title="Farbe der Hintergrund-Abdeckung über dem Originaltext" value={el.coverColor} onChange={(c) => set({ coverColor: c }, false)} onBeforeChange={commit} />
         </Row>
       )}
+      <button
+        className="btn ghost insp-wide"
+        onClick={writeInThisFont}
+        title="Die Schrift dieses Feldes übernehmen – der nächste Klick auf die Seite setzt dort ein neues Textfeld in genau dieser Schrift"
+      >
+        <Type size={15} /> In dieser Schrift schreiben
+      </button>
     </Group>
   );
 }
@@ -621,7 +736,7 @@ function InkProps({ el, set, commit }: { el: InkElement; set: (p: ElementPatch, 
     <Group title={marker ? 'Marker' : 'Zeichnung'}>
       <Row>
         <label>Farbe</label>
-        <ColorPicker title={marker ? 'Markerfarbe' : 'Linienfarbe'} value={el.color} onChange={(c) => set({ color: c })} />
+        <ColorPicker title={marker ? 'Markerfarbe' : 'Linienfarbe'} value={el.color} onChange={(c) => set({ color: c }, false)} onBeforeChange={commit} />
       </Row>
       <Row>
         <label>Stärke</label>
@@ -631,8 +746,8 @@ function InkProps({ el, set, commit }: { el: InkElement; set: (p: ElementPatch, 
           max={marker ? 48 : 24}
           step={0.5}
           value={el.strokeWidth}
+          onPointerDown={commit}
           onChange={(e) => set({ strokeWidth: Number(e.target.value) }, false)}
-          onMouseUp={commit}
         />
         <span className="insp-val">{el.strokeWidth.toFixed(1)}</span>
       </Row>
@@ -644,8 +759,8 @@ function InkProps({ el, set, commit }: { el: InkElement; set: (p: ElementPatch, 
           max={1}
           step={0.05}
           value={el.opacity}
+          onPointerDown={commit}
           onChange={(e) => set({ opacity: Number(e.target.value) }, false)}
-          onMouseUp={commit}
         />
         <span className="insp-val">{Math.round(el.opacity * 100)}%</span>
       </Row>
@@ -665,32 +780,32 @@ function InkProps({ el, set, commit }: { el: InkElement; set: (p: ElementPatch, 
   );
 }
 
-function RectEllipseProps({ el, set, radius }: { el: Extract<AnyElement, { type: 'rect' | 'ellipse' }>; set: (p: ElementPatch) => void; radius?: boolean }) {
+function RectEllipseProps({ el, set, commit, radius }: { el: Extract<AnyElement, { type: 'rect' | 'ellipse' }>; set: (p: ElementPatch, doCommit?: boolean) => void; commit: () => void; radius?: boolean }) {
   return (
     <Group title={el.type === 'rect' ? 'Rechteck' : 'Ellipse'}>
       <Row>
         <label>Füllung</label>
-        <ColorPicker title="Füllfarbe" value={el.fill ?? '#ffffff'} onChange={(c) => set({ fill: c })} />
+        <ColorPicker title="Füllfarbe" value={el.fill ?? '#ffffff'} onChange={(c) => set({ fill: c }, false)} onBeforeChange={commit} />
         <button className="btn ghost" onClick={() => set({ fill: null })}>
           ohne
         </button>
       </Row>
       <Row>
         <label>Rand</label>
-        <ColorPicker title="Randfarbe" value={el.stroke ?? '#111111'} onChange={(c) => set({ stroke: c })} />
-        <input className="field field-sm" type="number" min={0} max={20} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+        <ColorPicker title="Randfarbe" value={el.stroke ?? '#111111'} onChange={(c) => set({ stroke: c }, false)} onBeforeChange={commit} />
+        <NumField value={el.strokeWidth} min={0} max={20} onValue={(n) => set({ strokeWidth: n }, false)} onBeforeChange={commit} title="Randstärke (pt)" />
       </Row>
       {radius && el.type === 'rect' && (
         <Row>
           <label>Radius</label>
-          <input className="field field-sm" type="number" min={0} max={60} value={el.radius} onChange={(e) => set({ radius: Number(e.target.value) })} />
+          <NumField value={el.radius} min={0} max={60} onValue={(n) => set({ radius: n }, false)} onBeforeChange={commit} />
         </Row>
       )}
     </Group>
   );
 }
 
-function VectorShapeProps({ el, set }: { el: ShapeElement; set: (p: ElementPatch) => void }) {
+function VectorShapeProps({ el, set, commit }: { el: ShapeElement; set: (p: ElementPatch, doCommit?: boolean) => void; commit: () => void }) {
   const strokeOnly = isStrokeOnlyShape(el.shape);
   return (
     <Group title={SHAPE_META[el.shape].label}>
@@ -715,7 +830,7 @@ function VectorShapeProps({ el, set }: { el: ShapeElement; set: (p: ElementPatch
       {!strokeOnly && (
         <Row>
           <label>Füllung</label>
-          <ColorPicker title="Füllfarbe" value={el.fill ?? '#ffffff'} onChange={(c) => set({ fill: c })} />
+          <ColorPicker title="Füllfarbe" value={el.fill ?? '#ffffff'} onChange={(c) => set({ fill: c }, false)} onBeforeChange={commit} />
           <button className="btn ghost" onClick={() => set({ fill: null })}>
             ohne
           </button>
@@ -723,8 +838,8 @@ function VectorShapeProps({ el, set }: { el: ShapeElement; set: (p: ElementPatch
       )}
       <Row>
         <label>{strokeOnly ? 'Farbe' : 'Rand'}</label>
-        <ColorPicker title="Randfarbe" value={el.stroke ?? '#111111'} onChange={(c) => set({ stroke: c })} />
-        <input className="field field-sm" type="number" min={strokeOnly ? 1 : 0} max={24} step={0.5} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+        <ColorPicker title="Randfarbe" value={el.stroke ?? '#111111'} onChange={(c) => set({ stroke: c }, false)} onBeforeChange={commit} />
+        <NumField value={el.strokeWidth} min={strokeOnly ? 1 : 0} max={24} step={0.5} onValue={(n) => set({ strokeWidth: n }, false)} onBeforeChange={commit} title="Randstärke (pt)" />
       </Row>
       <Row>
         <label>Stil</label>
@@ -740,7 +855,7 @@ function VectorShapeProps({ el, set }: { el: ShapeElement; set: (p: ElementPatch
   );
 }
 
-function CalloutProps({ el, set }: { el: CalloutElement; set: (p: ElementPatch) => void }) {
+function CalloutProps({ el, set, commit }: { el: CalloutElement; set: (p: ElementPatch, doCommit?: boolean) => void; commit: () => void }) {
   return (
     <>
       <Group title="Text">
@@ -748,12 +863,22 @@ function CalloutProps({ el, set }: { el: CalloutElement; set: (p: ElementPatch) 
           <FontPicker value={el.family} onChange={(family) => set({ family })} />
         </Row>
         <Row>
-          <input className="field field-sm" type="number" min={4} max={200} value={el.size} onChange={(e) => set({ size: Number(e.target.value) })} />
-          <ColorPicker title="Textfarbe" value={el.color} onChange={(c) => set({ color: c })} />
-          <button className={`btn icon ${el.bold ? 'primary' : 'ghost'}`} onClick={() => set({ bold: !el.bold })} title="Fett">
+          <NumField value={el.size} min={4} max={200} onValue={(n) => set({ size: n }, false)} onBeforeChange={commit} title="Schriftgrösse (pt)" />
+          <ColorPicker title="Textfarbe" value={el.color} onChange={(c) => set({ color: c }, false)} onBeforeChange={commit} />
+          <button
+            className={`btn icon ${el.bold ? 'primary' : 'ghost'}`}
+            disabled={!el.bold && !fontCapabilities(el.family).bold}
+            onClick={() => set({ bold: !el.bold })}
+            title={!el.bold && !fontCapabilities(el.family).bold ? 'Diese Schrift bietet keinen echten Fettschnitt' : 'Fett'}
+          >
             <Bold size={15} />
           </button>
-          <button className={`btn icon ${el.italic ? 'primary' : 'ghost'}`} onClick={() => set({ italic: !el.italic })} title="Kursiv">
+          <button
+            className={`btn icon ${el.italic ? 'primary' : 'ghost'}`}
+            disabled={!el.italic && !fontCapabilities(el.family).italic}
+            onClick={() => set({ italic: !el.italic })}
+            title={!el.italic && !fontCapabilities(el.family).italic ? 'Diese Schrift bietet keinen echten Kursivschnitt' : 'Kursiv'}
+          >
             <Italic size={15} />
           </button>
         </Row>
@@ -774,13 +899,13 @@ function CalloutProps({ el, set }: { el: CalloutElement; set: (p: ElementPatch) 
       <Group title="Sprechblase">
         <Row>
           <label>Füllung</label>
-          <ColorPicker title="Blasenfarbe" value={el.fill} onChange={(c) => set({ fill: c })} />
+          <ColorPicker title="Blasenfarbe" value={el.fill} onChange={(c) => set({ fill: c }, false)} onBeforeChange={commit} />
           <label>Rand</label>
-          <ColorPicker title="Randfarbe" value={el.stroke ?? '#f59e0b'} onChange={(c) => set({ stroke: c })} />
+          <ColorPicker title="Randfarbe" value={el.stroke ?? '#f59e0b'} onChange={(c) => set({ stroke: c }, false)} onBeforeChange={commit} />
         </Row>
         <Row>
           <label>Randstärke</label>
-          <input className="field field-sm" type="number" min={0} max={12} step={0.5} value={el.strokeWidth} onChange={(e) => set({ strokeWidth: Number(e.target.value) })} />
+          <NumField value={el.strokeWidth} min={0} max={12} step={0.5} onValue={(n) => set({ strokeWidth: n }, false)} onBeforeChange={commit} />
           <button className="btn ghost" onClick={() => set({ stroke: el.stroke ? null : '#f59e0b' })}>
             {el.stroke ? 'ohne Rand' : 'mit Rand'}
           </button>
@@ -790,7 +915,7 @@ function CalloutProps({ el, set }: { el: CalloutElement; set: (p: ElementPatch) 
   );
 }
 
-function ImageProps({ el, set }: { el: ImageElement; set: (p: ElementPatch) => void }) {
+function ImageProps({ el, set, commit }: { el: ImageElement; set: (p: ElementPatch, doCommit?: boolean) => void; commit: () => void }) {
   const editImage = useStore((s) => s.openImageEditor);
   const hasBorder = !!el.borderColor && (el.borderWidth ?? 0) > 0;
   return (
@@ -802,15 +927,15 @@ function ImageProps({ el, set }: { el: ImageElement; set: (p: ElementPatch) => v
       </div>
       <Row>
         <label>Rand</label>
-        <ColorPicker title="Randfarbe" value={el.borderColor ?? '#111111'} onChange={(c) => set({ borderColor: c, borderWidth: el.borderWidth || 2 })} />
-        <input
-          className="field field-sm"
-          type="number"
+        <ColorPicker title="Randfarbe" value={el.borderColor ?? '#111111'} onChange={(c) => set({ borderColor: c, borderWidth: el.borderWidth || 2 }, false)} onBeforeChange={commit} />
+        <NumField
+          value={el.borderWidth ?? 0}
           min={0}
           max={40}
           step={0.5}
-          value={el.borderWidth ?? 0}
-          onChange={(e) => set({ borderWidth: Number(e.target.value), borderColor: el.borderColor ?? '#111111' })}
+          onValue={(n) => set({ borderWidth: n, borderColor: el.borderColor ?? '#111111' }, false)}
+          onBeforeChange={commit}
+          title="Randstärke (pt)"
         />
       </Row>
       {hasBorder && (

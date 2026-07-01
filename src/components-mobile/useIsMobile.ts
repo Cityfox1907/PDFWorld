@@ -3,14 +3,15 @@ import { useEffect, useState } from 'react';
 /**
  * Decides whether to mount the touch-first mobile UI instead of the desktop workspace.
  * A device counts as "mobile" when it has a coarse (touch) pointer on a phone/tablet-sized
- * viewport, OR when the window is simply narrow — so the desktop experience is left
- * completely untouched on real desktops, while phones and narrow windows get the app UI.
+ * viewport. A mouse-driven desktop keeps its workspace even in a narrowed window (the
+ * sidebar/rail workflow stays available); only a genuinely tiny window (< 600 px, where
+ * the desktop chrome physically no longer fits) falls back to the touch shell too.
  */
 function evaluate(): boolean {
   if (typeof window === 'undefined') return false;
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   const w = window.innerWidth;
-  return (coarse && w <= 1024) || w <= 820;
+  return (coarse && w <= 1024) || w <= 600;
 }
 
 export function useIsMobile(): boolean {

@@ -81,8 +81,16 @@ function SortablePage({ page, index, thumbZoom }: { page: EditorPage; index: num
         {...attributes}
         {...listeners}
         onClick={() => setCurrentPage(page.id)}
+        onKeyDown={(e) => {
+          // role="button" needs real keyboard activation, not just focusability.
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setCurrentPage(page.id);
+          }
+        }}
         role="button"
         tabIndex={0}
+        aria-label={`Seite ${index + 1} anzeigen`}
       >
         <Thumbnail page={page} thumbZoom={thumbZoom} />
       </div>

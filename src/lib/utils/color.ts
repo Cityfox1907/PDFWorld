@@ -39,7 +39,11 @@ export function sampleBackground(
   // Probe whole strips just outside each edge of the run (where the page
   // background is clean), then take the *mode* colour. Strips beat single points
   // because they survive specks, underlines and anti-aliased glyph edges.
-  const counts = new Map<string, number>();
+  // Pixels are bucketed at 4-bit per channel so near-identical tones merge, but the
+  // returned colour is the exact AVERAGE of the winning bucket's real pixels — a
+  // quantised bucket key alone would be up to 15/255 off per channel, which shows
+  // as a visible patch on tinted backgrounds.
+  const buckets = new Map<string, { n: number; r: number; g: number; b: number }>();
   const addStrip = (x0: number, y0: number, w: number, h: number) => {
     const x = Math.max(0, Math.min(canvas.width - 1, x0));
     const y = Math.max(0, Math.min(canvas.height - 1, y0));
@@ -48,10 +52,13 @@ export function sampleBackground(
     try {
       const d = ctx.getImageData(x, y, ww, hh).data;
       for (let i = 0; i < d.length; i += 4) {
-        // Quantise to 4-bit per channel so near-identical tones merge.
-        const q = (v: number) => (v & 0xf0);
-        const hex = `#${q(d[i]).toString(16).padStart(2, '0')}${q(d[i + 1]).toString(16).padStart(2, '0')}${q(d[i + 2]).toString(16).padStart(2, '0')}`;
-        counts.set(hex, (counts.get(hex) ?? 0) + 1);
+        const key = `${d[i] & 0xf0}:${d[i + 1] & 0xf0}:${d[i + 2] & 0xf0}`;
+        const b = buckets.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+        b.n++;
+        b.r += d[i];
+        b.g += d[i + 1];
+        b.b += d[i + 2];
+        buckets.set(key, b);
       }
     } catch {
       /* cross-origin or out of range */
@@ -63,15 +70,13 @@ export function sampleBackground(
   addStrip(left, top - pad * 2, right - left, pad); // above
   addStrip(left, bottom + pad, right - left, pad); // below
 
-  let best = '#ffffff';
-  let bestCount = 0;
-  for (const [hex, count] of counts) {
-    if (count > bestCount) {
-      best = hex;
-      bestCount = count;
-    }
+  let best: { n: number; r: number; g: number; b: number } | null = null;
+  for (const b of buckets.values()) {
+    if (!best || b.n > best.n) best = b;
   }
-  return best;
+  if (!best) return '#ffffff';
+  const hex = (v: number) => Math.round(v / best!.n).toString(16).padStart(2, '0');
+  return `#${hex(best.r)}${hex(best.g)}${hex(best.b)}`;
 }
 
 /**

@@ -1184,6 +1184,21 @@ svg.draft {
   color: var(--success);
   margin: -2px 0 8px;
 }
+/* Numbered mini-guide for tools whose flow has clear steps (scan tool). */
+.insp-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.insp-steps li::marker {
+  color: var(--accent);
+  font-weight: 700;
+}
 /* Live preview of the current pen/marker stroke. */
 .stroke-preview {
   margin-top: 4px;
@@ -1608,8 +1623,20 @@ svg.draft {
   border-radius: 12px;
   box-shadow: var(--shadow-lg);
   z-index: 200;
-  animation: pop 0.25s var(--ease);
+  /* Own keyframes: the generic `pop` animates transform WITHOUT the translateX(-50%)
+     centering, so every toast used to jump half its width to the right on entry. */
+  animation: toast-pop 0.25s var(--ease);
   max-width: 90vw;
+}
+@keyframes toast-pop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
 }
 .toast.success svg {
   color: var(--success);
@@ -1788,10 +1815,113 @@ svg.draft {
   color: var(--danger);
 }
 
-/* ── scan: picked line, font panel & alignment guide ────────────────────── */
-.run-box.active {
-  background: var(--accent-ring);
-  box-shadow: inset 0 0 0 1.5px var(--accent), 0 2px 12px var(--accent-tint);
+/* ── scan: in-place line editor & alignment guide ─────────────────────────── */
+
+/* Page-anchored background cover of an in-place text replacement (see CoverView). */
+.text-cover {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Transient editor over a scanned line: cover + textarea + info chip. */
+.run-editor {
+  position: absolute;
+  z-index: 12;
+}
+.run-editor-cover {
+  position: absolute;
+  border-radius: 1px;
+}
+.run-editor-input {
+  position: relative;
+  display: block;
+  border: none;
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  caret-color: var(--accent);
+}
+.run-editor-chip {
+  position: absolute;
+  top: -34px;
+  left: -2px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 6px 0 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  font-size: 11.5px;
+  white-space: nowrap;
+  z-index: 21;
+  animation: pop 0.15s var(--ease);
+}
+.run-chip-name {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-chip-meta {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.run-chip-badge {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--success);
+  background: rgba(52, 199, 89, 0.14);
+}
+.run-chip-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: transform 0.1s var(--ease), border-color 0.1s;
+}
+.run-chip-swatch:hover {
+  transform: scale(1.12);
+  border-color: var(--accent);
+}
+.run-chip-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+}
+.run-chip-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.run-chip-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+.run-chip-btn.primary {
+  color: #fff;
+  background: var(--accent);
+}
+.run-chip-btn.primary:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
 }
 
 /* Alignment guides shown while a text box is being moved: the horizontal one lights
@@ -1829,125 +1959,6 @@ svg.draft {
   background: var(--accent-tint);
   pointer-events: none;
   z-index: 6;
-}
-
-.font-panel {
-  position: absolute;
-  z-index: 20;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-lg);
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 12px;
-}
-.font-panel-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-2);
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-.font-panel-head > span {
-  flex: 1;
-}
-.font-panel-x {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  color: var(--text-3);
-}
-.font-panel-x:hover {
-  background: var(--bg-elevated);
-  color: var(--text);
-}
-.font-panel-name {
-  font-size: 18px;
-  line-height: 1.2;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* The detected line redrawn in its own typeface — an immediate, honest preview. */
-.font-panel-preview {
-  font-size: 19px;
-  line-height: 1.25;
-  padding: 7px 10px;
-  border-radius: var(--r-sm);
-  background: var(--panel-2);
-  border: 1px solid var(--line-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.font-panel-badge {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  padding: 5px 8px;
-  border-radius: var(--r-sm);
-  line-height: 1.25;
-}
-.font-panel-badge.ok {
-  color: var(--success);
-  background: rgba(52, 199, 89, 0.12);
-}
-.font-panel-badge.warn {
-  color: var(--warning);
-  background: rgba(255, 159, 10, 0.12);
-}
-.font-panel-badge.neutral {
-  color: var(--text-2);
-  background: var(--bg-elevated);
-}
-.font-panel-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-.font-panel-swatch {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  border: 1px solid var(--line);
-  margin-left: auto;
-  cursor: pointer;
-  transition: transform 0.1s var(--ease), border-color 0.1s;
-}
-.font-panel-swatch:hover {
-  transform: scale(1.12);
-  border-color: var(--accent);
-}
-.font-panel-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.font-panel-actions .btn {
-  width: 100%;
-  justify-content: center;
-}
-.font-panel-actions .btn.sm {
-  font-size: 11px;
-  padding: 5px 8px;
-}
-.font-panel-foot {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-3);
-  text-align: center;
 }
 
 /* ── IMAGE EDITOR (crop) ── */

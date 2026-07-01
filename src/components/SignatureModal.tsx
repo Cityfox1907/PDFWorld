@@ -40,6 +40,9 @@ export function SignatureModal() {
     };
     const down = (e: PointerEvent) => {
       drawing = true;
+      // Capture the pointer so the stroke continues even when the hand drifts
+      // outside the canvas mid-signature — without this the line just stops.
+      canvas.setPointerCapture?.(e.pointerId);
       const p = pos(e);
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
@@ -58,10 +61,12 @@ export function SignatureModal() {
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
     return () => {
       canvas.removeEventListener('pointerdown', down);
       canvas.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
     };
   }, [open]);
 

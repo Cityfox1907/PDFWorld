@@ -78,8 +78,8 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
 
   const toggleLock = (e: React.MouseEvent) => {
     e.stopPropagation();
+    commit(); // snapshot BEFORE the change (commit records the current state)
     updateElement(pageId, el.id, { locked: !locked });
-    commit();
     flashLock();
   };
 
@@ -134,7 +134,14 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     const move = (ev: PointerEvent) => {
       let dx = (ev.clientX - startX) / scale;
       let dy = (ev.clientY - startY) / scale;
-      if (Math.abs(dx) + Math.abs(dy) > 0.5) moved = true;
+      // Snapshot the PRE-move state once, the moment the drag really starts: commit()
+      // records the current state, so it must run before the first mutation — a
+      // commit at drag-END would capture the already-moved state and undo would
+      // restore exactly that (a visible no-op, with the old position lost for good).
+      if (!moved && Math.abs(dx) + Math.abs(dy) > 0.5) {
+        moved = true;
+        commit();
+      }
       // Baseline / left-edge snapping is an alignment aid for a SINGLE text box; a group
       // drag moves everything rigidly so their relative layout is preserved.
       let guideY: number | null = null;
@@ -175,10 +182,9 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       node.releasePointerCapture?.(pointerId);
       onAlignGuide?.(null);
       onAlignGuideX?.(null);
-      if (moved) commit();
       // A click (no drag) on a member of a multi-selection narrows it down to just that
       // element — so a group can be broken back into a single pick without a detour.
-      else if (alreadySelected && groupIds.length > 1) selectElement(el.id);
+      if (!moved && alreadySelected && groupIds.length > 1) selectElement(el.id);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -199,9 +205,34 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
     const startY = e.clientY;
     const o = { x: el.x, y: el.y, w: el.width, h: el.height };
     const aspect = el.type === 'image' || el.type === 'signature' ? o.w / o.h : 0;
+    // A rotated element's handles are rotated with it, so the pointer delta must be
+    // read in the element's OWN axes — and the box edge opposite the dragged handle
+    // must stay visually pinned (growing a rotated box shifts its centre, which would
+    // otherwise swing the whole box around while resizing).
+    const rot = ((el.rotation ?? 0) * Math.PI) / 180;
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const anchorOf = (x: number, y: number, w: number, hh: number) => ({
+      x: h.includes('e') ? x : h.includes('w') ? x + w : x + w / 2,
+      y: h.includes('s') ? y : h.includes('n') ? y + hh : y + hh / 2,
+    });
+    const toWorld = (p: { x: number; y: number }, c: { x: number; y: number }) => ({
+      x: c.x + (p.x - c.x) * cos - (p.y - c.y) * sin,
+      y: c.y + (p.x - c.x) * sin + (p.y - c.y) * cos,
+    });
+    const anchor0 = toWorld(anchorOf(o.x, o.y, o.w, o.h), { x: o.x + o.w / 2, y: o.y + o.h / 2 });
+    // Snapshot the PRE-resize state on the first real movement (see startMove).
+    let resized = false;
     const move = (ev: PointerEvent) => {
-      const dx = (ev.clientX - startX) / scale;
-      const dy = (ev.clientY - startY) / scale;
+      const wdx = (ev.clientX - startX) / scale;
+      const wdy = (ev.clientY - startY) / scale;
+      if (!resized && Math.abs(wdx) + Math.abs(wdy) > 0.5) {
+        resized = true;
+        commit();
+      }
+      // Pointer delta expressed along the element's rotated axes.
+      const dx = wdx * cos + wdy * sin;
+      const dy = -wdx * sin + wdy * cos;
       let { x, y, w, h: hh } = o;
       if (h.includes('e')) w = Math.max(8, o.w + dx);
       if (h.includes('s')) hh = Math.max(8, o.h + dy);
@@ -217,6 +248,11 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
         hh = w / aspect;
         if (h.includes('n')) y = o.y + (o.h - hh);
       }
+      if (rot) {
+        const a1 = toWorld(anchorOf(x, y, w, hh), { x: x + w / 2, y: y + hh / 2 });
+        x += anchor0.x - a1.x;
+        y += anchor0.y - a1.y;
+      }
       updateElement(pageId, el.id, { x, y, width: w, height: hh });
     };
     const up = () => {
@@ -224,7 +260,6 @@ export function ElementView({ el, pageId, scale, editing, interactive, editTextM
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
       node.releasePointerCapture?.(pointerId);
-      commit();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
@@ -292,14 +327,37 @@ function ElementBody({
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Grow the box to hug its content (text never wraps, so the on-screen line matches
-  // the export, which also doesn't wrap). A new field therefore starts compact and
-  // lengthens only as far as the typed line — never the old over-wide, over-tall box.
+  // Content size of the textarea in CSS px. scrollWidth/scrollHeight never report
+  // less than the current layout box, so the textarea is collapsed for the read and
+  // restored right after — this is what lets a box SHRINK back when text is deleted.
+  const measureContent = (ta: HTMLTextAreaElement): { w: number; h: number } => {
+    const pw = ta.style.width;
+    const ph = ta.style.height;
+    ta.style.width = '0px';
+    ta.style.height = '0px';
+    const w = ta.scrollWidth;
+    const h = ta.scrollHeight;
+    ta.style.width = pw;
+    ta.style.height = ph;
+    return { w, h };
+  };
+
+  // Size the box to hug its content exactly (text never wraps, so the on-screen line
+  // matches the export, which also doesn't wrap): it grows while typing AND shrinks
+  // back when text is deleted, instead of keeping the widest size it ever had.
+  const contentBox = (ta: HTMLTextAreaElement): { width: number; height: number } => {
+    const t = el as TextElement | CalloutElement;
+    const { w, h } = measureContent(ta);
+    const minW = Math.max(12, t.size * 0.6);
+    const minH = t.size * t.lineHeight;
+    return {
+      width: Math.max(minW, Math.round(((w + 2) / scale) * 100) / 100), // +2px caret room
+      height: Math.max(minH, Math.round((h / scale) * 100) / 100),
+    };
+  };
+
   const fitToContent = (ta: HTMLTextAreaElement) => {
-    const w = (ta.scrollWidth + 2) / scale; // +2px: a little room for the end caret
-    const h = ta.scrollHeight / scale;
-    const width = Math.max(el.width, Math.round(w * 100) / 100);
-    const height = Math.max(el.height, Math.round(h * 100) / 100);
+    const { width, height } = contentBox(ta);
     if (width !== el.width || height !== el.height) updateElement(pageId, el.id, { width, height });
   };
 
@@ -327,9 +385,10 @@ function ElementBody({
         color: t.color,
         textAlign: t.align,
         lineHeight: t.lineHeight,
-        // When this text replaces existing PDF text, paint the sampled background
-        // behind it so the original glyphs are hidden live in the editor too.
-        background: t.coverColor ?? undefined,
+        // NOTE: when this text replaces existing PDF text (coverColor/coverRect), the
+        // background cover is painted by PageCanvas as a page-anchored layer *under*
+        // this element — never as a CSS background here, since the cover must not
+        // move, shrink or rotate together with the box.
       };
       // List markers hang in the margin to the LEFT of the box (so the box width — and
       // the left-edge alignment guide — stays on the text itself, matching the export).
@@ -372,9 +431,7 @@ function ElementBody({
               defaultValue={t.text}
               onChange={(e) => {
                 const ta = e.currentTarget;
-                const width = Math.max(el.width, (ta.scrollWidth + 2) / scale);
-                const height = Math.max(el.height, ta.scrollHeight / scale);
-                updateElement(pageId, el.id, { text: ta.value, width, height });
+                updateElement(pageId, el.id, { text: ta.value, ...contentBox(ta) });
               }}
               onBlur={onEndEdit}
               onPointerDown={(e) => e.stopPropagation()}

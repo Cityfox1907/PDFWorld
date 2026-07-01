@@ -38,7 +38,12 @@ export const useMobileUi = create<MobileUiState>((set, get) => ({
   close: () => set({ sheet: 'none' }),
   toggle: (sheet) => set({ sheet: get().sheet === sheet ? 'none' : sheet }),
   confirm: null,
-  askConfirm: (req) => set({ confirm: req }),
+  askConfirm: (req) => {
+    // Never silently replace an unresolved prompt — the first question must be
+    // answered (or dismissed) before the next destructive action can ask.
+    if (get().confirm) return;
+    set({ confirm: req });
+  },
   resolveConfirm: (accepted) => {
     const req = get().confirm;
     set({ confirm: null });

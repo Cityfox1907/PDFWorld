@@ -21,6 +21,8 @@ export {
   FontStore,
   BASELINE_RATIO,
   firstBaselineOffset,
+  coverInsets,
+  SCAN_LINE_HEIGHT,
 } from './fonts';
 export {
   FONT_CATALOG,
@@ -33,6 +35,7 @@ export {
   matchCatalogFontKey,
   resolveFamilyKey,
   fontDisplayName,
+  fontCapabilities,
   injectFontFaces,
 } from './fontCatalog';
 export type { FontDef, TextFaceCss } from './fontCatalog';

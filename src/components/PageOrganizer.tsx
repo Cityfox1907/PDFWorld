@@ -94,7 +94,8 @@ function OrganizerCard({
   index: number;
   tint?: string;
   selected: boolean;
-  onSelect: (e: React.MouseEvent, id: string) => void;
+  /** Only the modifier keys matter, so mouse AND keyboard activation both fit. */
+  onSelect: (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }, id: string) => void;
 }) {
   const currentPageId = useStore((s) => s.currentPageId);
   const rotatePage = useStore((s) => s.rotatePage);
@@ -127,8 +128,16 @@ function OrganizerCard({
         {...attributes}
         {...listeners}
         onClick={(e) => onSelect(e, page.id)}
+        onKeyDown={(e) => {
+          // role="button" needs real keyboard activation, not just focusability.
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelect(e, page.id);
+          }
+        }}
         role="button"
         tabIndex={0}
+        aria-label={`Seite ${index + 1} auswählen`}
       >
         {tint && <span className="org-srcbar" />}
         <OrganizerThumb page={page} />
@@ -204,7 +213,7 @@ export function PageOrganizer() {
 
   const selectedIds = pages.filter((p) => selected.has(p.id)).map((p) => p.id);
 
-  const onSelect = (e: React.MouseEvent, id: string) => {
+  const onSelect = (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }, id: string) => {
     const idx = pages.findIndex((p) => p.id === id);
     if (e.shiftKey && anchorRef.current) {
       // Range select from the anchor to the clicked card.

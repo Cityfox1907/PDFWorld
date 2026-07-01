@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../state/store';
 import { toHex } from '../lib/utils/color';
 import { Check, Pipette } from 'lucide-react';
@@ -30,22 +31,34 @@ function eyeDropperSupported(): boolean {
 export function ColorPicker({
   value,
   onChange,
+  onBeforeChange,
   title,
 }: {
   value: string;
   onChange: (hex: string) => void;
+  /**
+   * Called exactly once per popover session, right before the FIRST onChange. The
+   * inspector uses this to push ONE history snapshot for the whole colour pick, so
+   * dragging the OS colour dial doesn't flood undo with dozens of steps.
+   */
+  onBeforeChange?: () => void;
   title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const changedRef = useRef(false);
   const recent = useStore((s) => s.recentColors);
   const addRecentColor = useStore((s) => s.addRecentColor);
 
   const hex = toHex(value);
   const [hexDraft, setHexDraft] = useState(hex);
   useEffect(() => setHexDraft(hex), [hex]);
+  useEffect(() => {
+    if (open) changedRef.current = false; // a fresh session gets a fresh snapshot
+  }, [open]);
 
   // Fixed-position popover computed from the trigger, so the inspector's own scroll
   // never clips it; flips above when there isn't room below.
@@ -66,7 +79,10 @@ export function ColorPicker({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The popover lives in a body portal, so check both the trigger and the pop.
+      if (rootRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
@@ -84,12 +100,19 @@ export function ColorPicker({
     };
   }, [open, place]);
 
-  // Live update (no history of intermediate tones); records to the recent list only
-  // on a deliberate pick so dragging the OS dial doesn't flood it.
-  const preview = (c: string) => onChange(toHex(c));
+  // Live update (one history snapshot per session via onBeforeChange); records to the
+  // recent list only on a deliberate pick so dragging the OS dial doesn't flood it.
+  const emit = (h: string) => {
+    if (!changedRef.current) {
+      changedRef.current = true;
+      onBeforeChange?.();
+    }
+    onChange(h);
+  };
+  const preview = (c: string) => emit(toHex(c));
   const commit = (c: string, close = true) => {
     const h = toHex(c);
-    onChange(h);
+    emit(h);
     addRecentColor(h);
     if (close) setOpen(false);
   };
@@ -129,57 +152,61 @@ export function ColorPicker({
         <span className="color-swatch-chip" style={{ background: hex }} />
       </button>
 
-      {open && pos && (
-        <div className="color-pop" style={{ left: pos.left, top: pos.top, width: POP_W }}>
-          <div className="color-pop-grid">{PRESETS.map((c) => swatch(c, c))}</div>
+      {/* Body portal: escapes any transformed/overflow ancestor (inspector scroll,
+          mobile bottom sheets), so the popover always lands at its computed spot. */}
+      {open && pos &&
+        createPortal(
+          <div ref={popRef} className="color-pop" style={{ left: pos.left, top: pos.top, width: POP_W }}>
+            <div className="color-pop-grid">{PRESETS.map((c) => swatch(c, c))}</div>
 
-          {recent.length > 0 && (
-            <>
-              <div className="color-pop-label">Zuletzt verwendet</div>
-              <div className="color-pop-grid">{recent.map((c, i) => swatch(c, `r${i}`))}</div>
-            </>
-          )}
-
-          <div className="color-pop-foot">
-            <label className="color-native" title="Eigene Farbe wählen">
-              <input
-                type="color"
-                value={hex}
-                onChange={(e) => preview(e.target.value)}
-                onBlur={(e) => commit(e.target.value, false)}
-              />
-              <span className="color-native-ring" />
-            </label>
-            <input
-              className="color-hex"
-              value={hexDraft}
-              spellCheck={false}
-              onChange={(e) => {
-                const v = e.target.value;
-                setHexDraft(v);
-                if (/^#?[0-9a-fA-F]{6}$/.test(v)) preview(v.startsWith('#') ? v : `#${v}`);
-              }}
-              onBlur={() => {
-                if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft)) commit(hexDraft, false);
-                else setHexDraft(hex);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              }}
-            />
-            {eyeDropperSupported() && (
-              <button
-                type="button"
-                className="color-eyedrop"
-                onClick={pickFromScreen}
-                title="Farbe aus dem Dokument aufnehmen"
-              >
-                <Pipette size={15} />
-              </button>
+            {recent.length > 0 && (
+              <>
+                <div className="color-pop-label">Zuletzt verwendet</div>
+                <div className="color-pop-grid">{recent.map((c, i) => swatch(c, `r${i}`))}</div>
+              </>
             )}
-          </div>
-        </div>
-      )}
+
+            <div className="color-pop-foot">
+              <label className="color-native" title="Eigene Farbe wählen">
+                <input
+                  type="color"
+                  value={hex}
+                  onChange={(e) => preview(e.target.value)}
+                  onBlur={(e) => commit(e.target.value, false)}
+                />
+                <span className="color-native-ring" />
+              </label>
+              <input
+                className="color-hex"
+                value={hexDraft}
+                spellCheck={false}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setHexDraft(v);
+                  if (/^#?[0-9a-fA-F]{6}$/.test(v)) preview(v.startsWith('#') ? v : `#${v}`);
+                }}
+                onBlur={() => {
+                  if (/^#?[0-9a-fA-F]{6}$/.test(hexDraft)) commit(hexDraft, false);
+                  else setHexDraft(hex);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+              />
+              {eyeDropperSupported() && (
+                <button
+                  type="button"
+                  className="color-eyedrop"
+                  onClick={pickFromScreen}
+                  title="Farbe aus dem Dokument aufnehmen"
+                >
+                  <Pipette size={15} />
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

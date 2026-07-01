@@ -219,6 +219,13 @@ function ElementRow({ page, el, index }: { page: EditorPage; el: AnyElement; ind
     <div
       className={`layer-row ${selected ? 'active' : ''} ${el.hidden ? 'is-hidden' : ''}`}
       onClick={select}
+      onKeyDown={(e) => {
+        // role="button" needs real keyboard activation, not just focusability.
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          select();
+        }
+      }}
       role="button"
       tabIndex={0}
     >

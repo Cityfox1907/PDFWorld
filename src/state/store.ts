@@ -178,6 +178,12 @@ interface StoreState {
   addRecentColor: (color: string) => void;
   /** Arm (or clear) the typeface that the next page click writes in. */
   setPendingTextStyle: (style: PendingTextStyle | null) => void;
+  /**
+   * Arm a typeface for placement — the ONE entry point shared by the scan chip and
+   * the inspector's "In dieser Schrift schreiben" button: switches to the text tool
+   * and lets the next click on the page drop an empty field in exactly this style.
+   */
+  armTextStyle: (style: PendingTextStyle) => void;
   /** Open / close the image editor (crop) for an element. */
   openImageEditor: (id: string) => void;
   closeImageEditor: () => void;
@@ -526,6 +532,11 @@ export const useStore = create<StoreState>((set, get) => ({
   },
   setPendingTextStyle(style) {
     set({ pendingTextStyle: style });
+  },
+  armTextStyle(style) {
+    get().setTool('text');
+    set({ pendingTextStyle: style });
+    get().showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
   },
   openImageEditor(id) {
     set({ imageEditor: { id }, selectedElementId: id, selectedElementIds: [id] });

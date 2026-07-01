@@ -1,5 +1,5 @@
 import { StandardFonts } from 'pdf-lib';
-import type { BaseFamily } from './types';
+import type { BaseFamily, TextElement } from './types';
 
 /**
  * Where a line's baseline sits below the top of its glyph box, as a fraction of
@@ -35,11 +35,34 @@ export const SCAN_LINE_HEIGHT = 1.2;
 /**
  * How far a replacing text element's background cover extends past its cover region,
  * in points. Anti-aliased fringes of the original glyphs (and slight metric drift of
- * the extraction) would otherwise peek out around the edges. Shared by the editor
- * (screen cover) and the bake layer (export) so both hide exactly the same area.
+ * the extraction) would otherwise peek out around the edges.
  */
-export function coverInsets(size: number): { x: number; y: number } {
+function coverInsets(size: number): { x: number; y: number } {
   return { x: Math.max(1.5, size * 0.2), y: Math.max(1, size * 0.12) };
+}
+
+/**
+ * The final, already-inflated page region a replacing text element's cover paints
+ * over (view-points). THE single geometry rule shared by the editor's on-screen
+ * cover (CoverView), the transient run editor AND the export baker — one source, so
+ * screen and PDF can never disagree about what is hidden. Falls back to the
+ * element's own box for legacy elements without a page-anchored coverRect.
+ */
+export function coverRectFor(
+  el: Pick<TextElement, 'x' | 'y' | 'width' | 'height' | 'size' | 'coverRect'>,
+): { x: number; y: number; width: number; height: number } {
+  const pad = coverInsets(el.size);
+  const r = el.coverRect ?? { x: el.x, y: el.y, width: el.width, height: el.height };
+  return { x: r.x - pad.x, y: r.y - pad.y, width: r.width + pad.x * 2, height: r.height + pad.y * 2 };
+}
+
+/**
+ * How far above a scanned run's glyph-box top the replacing text box starts: half a
+ * line of leading, so the box's first baseline lands EXACTLY on the run's original
+ * baseline. Shared by the transient run editor and the element it commits.
+ */
+export function scanBoxOffset(size: number): number {
+  return (size * (SCAN_LINE_HEIGHT - 1)) / 2;
 }
 
 /**

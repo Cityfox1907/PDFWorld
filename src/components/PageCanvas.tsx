@@ -16,7 +16,8 @@ import {
   fontDisplayName,
   BASELINE_RATIO,
   firstBaselineOffset,
-  coverInsets,
+  coverRectFor,
+  scanBoxOffset,
   SCAN_LINE_HEIGHT,
   shapeOutline,
   pointsToSvgPath,
@@ -28,6 +29,7 @@ import {
   type TextRun,
 } from '../lib/pdf';
 import { sampleBackground, sampleTextColor, sampleColorAt } from '../lib/utils/color';
+import { measureTextareaContent } from '../lib/utils/measure';
 import { nearestBaseline } from '../lib/utils/align';
 import { inkDashArray } from '../lib/utils/ink';
 import { uid } from '../lib/utils/id';
@@ -82,6 +84,7 @@ export function PageCanvas() {
   const showToast = useStore((s) => s.showToast);
   const pendingTextStyle = useStore((s) => s.pendingTextStyle);
   const setPendingTextStyle = useStore((s) => s.setPendingTextStyle);
+  const armTextStyle = useStore((s) => s.armTextStyle);
   // One-shot "edit this text" signal from the touch chrome (no double-click on a phone).
   const editRequest = useStore((s) => s.editRequest);
   const elementsPanelOpen = useUI((s) => s.elementsPanelOpen);
@@ -1669,15 +1672,18 @@ export function PageCanvas() {
   // line never alters the file. `re` is passed explicitly (not read from state): a
   // click on the next line may already have opened a new editor when the old one
   // commits through its blur/unmount.
-  const finishRunEdit = (re: { idx: number; color: string; bg: string }, text: string) => {
+  const finishRunEdit = (re: { idx: number; color: string; bg: string }, text: string, contentW?: number) => {
     setRunEdit((cur) => (cur && cur.idx === re.idx ? null : cur));
     const run = runs[re.idx];
     if (!page || !run || text === run.str) return;
     const size = run.fontSize;
-    const off = (size * (SCAN_LINE_HEIGHT - 1)) / 2;
+    const off = scanBoxOffset(size);
     const lines = text.length ? text.split('\n') : [''];
+    // Prefer the width the editor's textarea actually rendered at — the committed box
+    // (and its cover) then matches the live edit to the pixel. The canvas measurement
+    // is only the fallback for the no-DOM path.
     const font = runFontString(run);
-    const width = Math.max(size * 0.6, ...lines.map((l) => measureLineWidth(l, font)));
+    const width = contentW ?? Math.max(size * 0.6, ...lines.map((l) => measureLineWidth(l, font)));
     const el: TextElement = {
       id: uid('el'),
       type: 'text',
@@ -1716,7 +1722,7 @@ export function PageCanvas() {
     const run = runs[re.idx];
     if (!run) return;
     setRunEdit(null);
-    setPendingTextStyle({
+    armTextStyle({
       family: run.family, // metric fallback when the original font can't be embedded
       size: run.fontSize,
       bold: run.bold,
@@ -1726,8 +1732,6 @@ export function PageCanvas() {
       embeddedFontId: run.embeddedFontId, // reuse the ORIGINAL typeface when captured
       fontLabel: run.fontLabel, // carry the real name so the inspector shows it
     });
-    setTool('text'); // arm placement; the next click drops the field in this font
-    showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
   };
 
   // Adopt the line's detected ink colour as the default for new text everywhere.
@@ -1833,10 +1837,11 @@ export function PageCanvas() {
                   key={`${scanId}:${runEdit.idx}`}
                   run={runs[runEdit.idx]}
                   scale={scale}
+                  stageW={view.width * scale}
                   color={runEdit.color}
                   bg={runEdit.bg}
                   caretX={runEdit.caretX}
-                  onCommit={(text) => finishRunEdit(runEdit, text)}
+                  onCommit={(text, contentW) => finishRunEdit(runEdit, text, contentW)}
                   onCancel={() => setRunEdit((cur) => (cur && cur.idx === runEdit.idx ? null : cur))}
                   onAdoptStyle={() => adoptRunStyle(runEdit)}
                   onUseColor={useDetectedColor}
@@ -2107,22 +2112,21 @@ function caretIndexAtX(text: string, x: number, font: string): number {
 
 /**
  * Page-anchored background cover of an in-place text replacement: the sampled page
- * colour over the ORIGINAL line's region, slightly inflated by the shared insets so
- * anti-aliased glyph fringes never peek out. Deliberately independent of the text
- * box: moving, shrinking or rotating the replacement never uncovers the original.
- * Mirrors the bake layer's cover exactly (same rect, same insets).
+ * colour over the ORIGINAL line's region. Deliberately independent of the text box:
+ * moving, shrinking or rotating the replacement never uncovers the original. The
+ * geometry comes from the ONE shared rule (coverRectFor), so it always matches the
+ * exported cover exactly.
  */
 function CoverView({ el, scale }: { el: TextElement; scale: number }) {
-  const r = el.coverRect ?? { x: el.x, y: el.y, width: el.width, height: el.height };
-  const pad = coverInsets(el.size);
+  const r = coverRectFor(el);
   return (
     <div
       className="text-cover"
       style={{
-        left: (r.x - pad.x) * scale,
-        top: (r.y - pad.y) * scale,
-        width: (r.width + pad.x * 2) * scale,
-        height: (r.height + pad.y * 2) * scale,
+        left: r.x * scale,
+        top: r.y * scale,
+        width: r.width * scale,
+        height: r.height * scale,
         background: el.coverColor,
         opacity: el.opacity,
       }}
@@ -2141,6 +2145,7 @@ function CoverView({ el, scale }: { el: TextElement; scale: number }) {
 function RunEditor({
   run,
   scale,
+  stageW,
   color,
   bg,
   caretX,
@@ -2151,30 +2156,52 @@ function RunEditor({
 }: {
   run: TextRun;
   scale: number;
+  /** stage width in CSS px, so the info chip can clamp itself onto the page */
+  stageW: number;
   color: string;
   bg: string;
   caretX: number | null;
-  onCommit: (text: string) => void;
+  /** `contentW` is the textarea's rendered content width (view-points), so the
+   *  committed element matches the live edit to the pixel. */
+  onCommit: (text: string, contentW?: number) => void;
   onCancel: () => void;
   onAdoptStyle: () => void;
   onUseColor: (color: string) => void;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const chipRef = useRef<HTMLDivElement>(null);
   const doneRef = useRef(false);
   const size = run.fontSize;
-  const off = (size * (SCAN_LINE_HEIGHT - 1)) / 2;
-  const pad = coverInsets(size);
+  const off = scanBoxOffset(size);
+  const elY = run.y - off;
   const face = textFaceCss(run.family, run.embeddedFontId, run.bold, run.italic);
   const [content, setContent] = useState<{ w: number; h: number }>({
     w: Math.max(run.width, size * 0.6),
     h: size * SCAN_LINE_HEIGHT,
   });
+  // Live cover from the ONE shared geometry rule (identical to CoverView + export),
+  // expressed relative to this editor's own origin. It tracks the growing content so
+  // a longer replacement is covered while typing, exactly like the committed result.
+  const cover = coverRectFor({
+    x: run.x,
+    y: elY,
+    width: 0,
+    height: 0,
+    size,
+    coverRect: { x: run.x, y: run.y, width: Math.max(run.width, content.w), height: run.height },
+  });
+
+  const contentWidthNow = (): number | undefined => {
+    const ta = taRef.current;
+    if (!ta) return undefined;
+    return Math.max((measureTextareaContent(ta).w + 2) / scale, size * 0.6);
+  };
 
   const finish = (cancel: boolean) => {
     if (doneRef.current) return;
     doneRef.current = true;
     if (cancel) onCancel();
-    else onCommit(taRef.current?.value ?? run.str);
+    else onCommit(taRef.current?.value ?? run.str, contentWidthNow());
   };
   // Unmount safety net: switching tools or pages unmounts this editor without a blur,
   // and typed text must still be committed instead of silently dropped. It fires ONLY
@@ -2187,24 +2214,13 @@ function RunEditor({
       const val = taRef.current?.value;
       if (doneRef.current || val == null || val === run.str) return;
       doneRef.current = true;
-      onCommit(val);
+      onCommit(val, contentWidthNow());
     };
   });
   useEffect(() => () => finishRef.current(), []);
 
   const autoFit = (ta: HTMLTextAreaElement) => {
-    // Collapse before reading so scrollWidth/Height report the pure content size
-    // (they never shrink below the current layout box otherwise). The previous
-    // inline size is restored verbatim — React only re-applies its style prop when
-    // the value changes, so blanking it here could leave the box collapsed.
-    const pw = ta.style.width;
-    const ph = ta.style.height;
-    ta.style.width = '0px';
-    ta.style.height = '0px';
-    const w = ta.scrollWidth;
-    const h = ta.scrollHeight;
-    ta.style.width = pw;
-    ta.style.height = ph;
+    const { w, h } = measureTextareaContent(ta);
     setContent({
       w: Math.max((w + 2) / scale, size * 0.6),
       h: Math.max(h / scale, size * SCAN_LINE_HEIGHT),
@@ -2224,19 +2240,29 @@ function RunEditor({
   }, []);
 
   // Chip above the line; below it when the line sits at the very top of the page.
-  const chipBelow = (run.y - off) * scale < 44;
+  const chipBelow = elY * scale < 44;
   const styleBits = [run.bold ? 'Fett' : null, run.italic ? 'Kursiv' : null].filter(Boolean).join(' · ');
 
+  // Clamp the chip onto the page: a line near the right edge would otherwise push
+  // the chip (and its action buttons) off-stage where they can't be reached.
+  const [chipLeft, setChipLeft] = useState(-2);
+  useLayoutEffect(() => {
+    const w = chipRef.current?.offsetWidth ?? 0;
+    const minLeft = 4 - run.x * scale; // keep 4px from the page's left edge
+    const maxLeft = stageW - 4 - w - run.x * scale; // …and 4px from the right edge
+    setChipLeft(Math.max(minLeft, Math.min(-2, maxLeft)));
+  }, [run.x, scale, stageW]);
+
   return (
-    <div className="run-editor" style={{ left: run.x * scale, top: (run.y - off) * scale }}>
+    <div className="run-editor" style={{ left: run.x * scale, top: elY * scale }}>
       {/* Live cover: hides the original glyphs while typing, exactly like the result. */}
       <div
         className="run-editor-cover"
         style={{
-          left: -pad.x * scale,
-          top: (off - pad.y) * scale,
-          width: (Math.max(run.width, content.w) + pad.x * 2) * scale,
-          height: (run.height + pad.y * 2) * scale,
+          left: (cover.x - run.x) * scale,
+          top: (cover.y - elY) * scale,
+          width: cover.width * scale,
+          height: cover.height * scale,
           background: bg,
         }}
       />
@@ -2267,8 +2293,9 @@ function RunEditor({
       />
       {/* Compact info chip: detected typeface, size/style, embedded badge + actions. */}
       <div
+        ref={chipRef}
         className={`run-editor-chip ${chipBelow ? 'below' : ''}`}
-        style={chipBelow ? { top: (off + run.height + pad.y) * scale + 6 } : undefined}
+        style={{ left: chipLeft, ...(chipBelow ? { top: (cover.y + cover.height - elY) * scale + 6 } : null) }}
         onPointerDown={(e) => {
           // Keep focus in the textarea so chip clicks never blur-commit halfway.
           e.preventDefault();

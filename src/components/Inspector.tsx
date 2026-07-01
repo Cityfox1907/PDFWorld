@@ -72,6 +72,11 @@ function Row({ children }: { children: React.ReactNode }) {
  * typed values are CLAMPED to [min, max] (HTML min/max are advisory for typing),
  * and a whole focus session records exactly ONE history step — the snapshot is
  * taken before the first change, not once per keystroke.
+ *
+ * While the field is focused it holds a local draft and only pushes values that are
+ * already inside the range: a transient prefix (the "1" of "18" in a min-4 field)
+ * must never be snapped up to min mid-typing — that would make "18" untypeable.
+ * The final clamp happens on blur.
  */
 function NumField({
   value,
@@ -91,6 +96,14 @@ function NumField({
   title?: string;
 }) {
   const touched = useRef(false);
+  const [draft, setDraft] = useState<string | null>(null); // non-null while focused
+  const push = (n: number) => {
+    if (!touched.current) {
+      touched.current = true;
+      onBeforeChange();
+    }
+    onValue(n);
+  };
   return (
     <input
       className="field field-sm"
@@ -98,19 +111,26 @@ function NumField({
       min={min}
       max={max}
       step={step}
-      value={value}
+      value={draft ?? value}
       title={title}
       onFocus={() => {
         touched.current = false;
+        setDraft(String(value));
       }}
       onChange={(e) => {
-        const n = Number(e.target.value);
-        if (e.target.value === '' || Number.isNaN(n)) return;
-        if (!touched.current) {
-          touched.current = true;
-          onBeforeChange();
+        const raw = e.target.value;
+        setDraft(raw);
+        const n = Number(raw);
+        if (raw === '' || Number.isNaN(n) || n < min || n > max) return;
+        push(n);
+      }}
+      onBlur={() => {
+        const n = Number(draft);
+        if (draft !== '' && draft !== null && !Number.isNaN(n)) {
+          const clamped = Math.min(max, Math.max(min, n));
+          if (clamped !== value) push(clamped);
         }
-        onValue(Math.min(max, Math.max(min, n)));
+        setDraft(null);
       }}
     />
   );
@@ -617,9 +637,7 @@ function ToolSettings({
 }
 
 function TextProps({ el, set, commit }: { el: TextElement; set: (p: ElementPatch, doCommit?: boolean) => void; commit: () => void }) {
-  const setPendingTextStyle = useStore((s) => s.setPendingTextStyle);
-  const setTool = useStore((s) => s.setTool);
-  const showToast = useStore((s) => s.showToast);
+  const armTextStyle = useStore((s) => s.armTextStyle);
   // When this field carries a captured ORIGINAL typeface (scan editor), the font control
   // shows that real font — its true name and a preview in the actual face — instead of
   // the metric fallback family, so the inspector and the text on the page always agree.
@@ -627,8 +645,8 @@ function TextProps({ el, set, commit }: { el: TextElement; set: (p: ElementPatch
   // original-font binding and lets the chosen family/style take effect.
   const originalCss = el.embeddedFontId ? embeddedFontFamily(el.embeddedFontId) : undefined;
   const showsOriginal = !!el.embeddedFontId && !!el.fontLabel;
-  const writeInThisFont = () => {
-    setPendingTextStyle({
+  const writeInThisFont = () =>
+    armTextStyle({
       family: el.family,
       size: el.size,
       bold: el.bold,
@@ -638,9 +656,6 @@ function TextProps({ el, set, commit }: { el: TextElement; set: (p: ElementPatch
       embeddedFontId: el.embeddedFontId,
       fontLabel: el.fontLabel,
     });
-    setTool('text');
-    showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
-  };
   return (
     <Group title="Schrift">
       {el.embeddedFontId && (

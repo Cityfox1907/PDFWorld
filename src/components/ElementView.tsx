@@ -19,6 +19,7 @@ import {
 } from '../lib/pdf';
 import { nearestBaseline } from '../lib/utils/align';
 import { inkDashArray } from '../lib/utils/ink';
+import { measureTextareaContent } from '../lib/utils/measure';
 import { Lock, Unlock } from 'lucide-react';
 
 // Screen-pixel catch radius for the alignment magnet while *dragging* text. Generous
@@ -327,31 +328,22 @@ function ElementBody({
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Content size of the textarea in CSS px. scrollWidth/scrollHeight never report
-  // less than the current layout box, so the textarea is collapsed for the read and
-  // restored right after — this is what lets a box SHRINK back when text is deleted.
-  const measureContent = (ta: HTMLTextAreaElement): { w: number; h: number } => {
-    const pw = ta.style.width;
-    const ph = ta.style.height;
-    ta.style.width = '0px';
-    ta.style.height = '0px';
-    const w = ta.scrollWidth;
-    const h = ta.scrollHeight;
-    ta.style.width = pw;
-    ta.style.height = ph;
-    return { w, h };
-  };
-
   // Size the box to hug its content exactly (text never wraps, so the on-screen line
   // matches the export, which also doesn't wrap): it grows while typing AND shrinks
   // back when text is deleted, instead of keeping the widest size it ever had.
   const contentBox = (ta: HTMLTextAreaElement): { width: number; height: number } => {
     const t = el as TextElement | CalloutElement;
-    const { w, h } = measureContent(ta);
+    const { w, h } = measureTextareaContent(ta);
     const minW = Math.max(12, t.size * 0.6);
     const minH = t.size * t.lineHeight;
+    const measured = Math.max(minW, Math.round(((w + 2) / scale) * 100) / 100); // +2px caret room
+    // Centre/right alignment positions each line against the BOX width (on screen and
+    // in the export), so a deliberately widened box must keep its width — shrinking it
+    // to the text would silently turn centred text into left-anchored text. Only
+    // left-aligned boxes hug their content, where the width has no visual effect.
+    const width = t.align === 'left' ? measured : Math.max(el.width, measured);
     return {
-      width: Math.max(minW, Math.round(((w + 2) / scale) * 100) / 100), // +2px caret room
+      width,
       height: Math.max(minH, Math.round((h / scale) * 100) / 100),
     };
   };

@@ -10,7 +10,7 @@ import {
   BlendMode,
 } from 'pdf-lib';
 import type { AnyElement, TextElement, RectElement, EllipseElement, ShapeElement, CalloutElement, HighlightElement, ImageElement, InkElement, FontFamilyKey } from './types';
-import { standardFontFor, firstBaselineOffset, coverInsets } from './fonts';
+import { standardFontFor, firstBaselineOffset, coverRectFor } from './fonts';
 import { baseFamilyOf, fontFileUrl } from './fontCatalog';
 import { getEmbeddedFont } from './embeddedFonts';
 import { shapeOutline, isStrokeOnlyShape, calloutOutline, calloutTailHeight, CALLOUT_PAD, type Pt } from './shapes';
@@ -395,21 +395,20 @@ export class Baker {
 
   private async drawText(page: PDFPage, el: TextElement, toPdfPoint: ToPdfPoint): Promise<void> {
     // 1) Hide the original glyphs when this edit replaces existing PDF text. The cover
-    //    is PAGE-anchored (coverRect): it stays over the original line even when the
-    //    replacement box was moved, shrunk or rotated afterwards — and it is inflated
-    //    by the shared insets so anti-aliased glyph fringes never peek out. Mirrors
-    //    the editor's on-screen cover exactly (see PageCanvas CoverLayer).
+    //    is PAGE-anchored: it stays over the original line even when the replacement
+    //    box was moved, shrunk or rotated afterwards. Geometry comes from the ONE
+    //    shared rule (coverRectFor), so it matches the editor's on-screen cover
+    //    exactly (see PageCanvas CoverView).
     if (el.coverColor) {
-      const pad = coverInsets(el.size);
-      const r = el.coverRect ?? { x: el.x, y: el.y, width: el.width, height: el.height };
+      const r = coverRectFor(el);
       const corners: Pt[] = [
-        { x: r.x - pad.x, y: r.y - pad.y },
-        { x: r.x + r.width + pad.x, y: r.y - pad.y },
-        { x: r.x + r.width + pad.x, y: r.y + r.height + pad.y },
-        { x: r.x - pad.x, y: r.y + r.height + pad.y },
+        { x: r.x, y: r.y },
+        { x: r.x + r.width, y: r.y },
+        { x: r.x + r.width, y: r.y + r.height },
+        { x: r.x, y: r.y + r.height },
       ];
       const d = this.pathFromPoints(corners, true, 0, 0, 0, toPdfPoint);
-      page.drawSvgPath(d, { x: 0, y: 0, color: rgbColor(el.coverColor) });
+      page.drawSvgPath(d, { x: 0, y: 0, color: rgbColor(el.coverColor), opacity: el.opacity });
     }
     await this.bakeTextBlock(page, toPdfPoint, {
       x: el.x,

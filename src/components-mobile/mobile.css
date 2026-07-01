@@ -694,18 +694,19 @@ html:has(.m-app) .toast {
 }
 /* The in-place editor's info chip: finger-sized touch targets on a phone. */
 .m-app .run-editor-chip {
-  height: 36px;
-  gap: 9px;
-  padding: 0 8px 0 12px;
-  font-size: 13px;
+  height: 44px;
+  gap: 10px;
+  padding: 0 8px 0 14px;
+  font-size: 13.5px;
+  top: -50px;
 }
 .m-app .run-chip-btn {
-  width: 30px;
-  height: 30px;
+  width: 38px;
+  height: 38px;
 }
 .m-app .run-chip-swatch {
-  width: 19px;
-  height: 19px;
+  width: 20px;
+  height: 20px;
 }
 
 /* ── APP-NATIVE CONFIRM DIALOG ──

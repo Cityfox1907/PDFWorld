@@ -21,7 +21,8 @@ export {
   FontStore,
   BASELINE_RATIO,
   firstBaselineOffset,
-  coverInsets,
+  coverRectFor,
+  scanBoxOffset,
   SCAN_LINE_HEIGHT,
 } from './fonts';
 export {

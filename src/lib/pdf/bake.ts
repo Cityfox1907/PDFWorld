@@ -8,6 +8,8 @@ import {
   degrees,
   LineCapStyle,
   BlendMode,
+  setCharacterSpacing,
+  setCharacterSqueeze,
 } from 'pdf-lib';
 import type { AnyElement, TextElement, RectElement, EllipseElement, ShapeElement, CalloutElement, HighlightElement, ImageElement, InkElement, FontFamilyKey } from './types';
 import { standardFontFor, firstBaselineOffset, coverInsets } from './fonts';
@@ -428,6 +430,8 @@ export class Baker {
       italic: el.italic,
       embeddedFontId: el.embeddedFontId,
       list: el.list,
+      letterSpacing: el.letterSpacing,
+      stretchX: el.stretchX,
     });
   }
 
@@ -453,7 +457,17 @@ export class Baker {
     const cx = o.pivotX ?? o.x + o.width / 2;
     const cy = o.pivotY ?? o.y + o.height / 2;
 
-    const drawAt = (vx: number, vy: number, text: string) => {
+    // Tracking & distortion, written as native PDF text state: Tc (character spacing,
+    // in unscaled text-space points — NOT multiplied by the font size) and Tz
+    // (horizontal scaling in %, which also scales Tc — exactly the "spacing is
+    // unstretched, stretch multiplies everything" model the editor renders with CSS
+    // letter-spacing + scaleX). Reset right after each draw so no other element or
+    // the page's own content is ever affected.
+    const ls = o.letterSpacing ?? 0;
+    const sx = o.stretchX ?? 1;
+    const styled = ls !== 0 || sx !== 1;
+
+    const drawAt = (vx: number, vy: number, text: string, plainMarker = false) => {
       let anchor: [number, number];
       let rotateDeg: number;
       if (rot) {
@@ -464,8 +478,15 @@ export class Baker {
         anchor = toPdfPoint(vx, vy);
         rotateDeg = axisAngleDeg(toPdfPoint, vx, vy);
       }
-      const draw = (font: PDFFont, t: string) =>
-        page.drawText(t, { x: anchor[0], y: anchor[1], size: o.size, font, color, opacity: o.opacity, rotate: degrees(rotateDeg) });
+      const spaced = styled && !plainMarker; // list markers stay unspaced, like on screen
+      const draw = (font: PDFFont, t: string) => {
+        if (spaced) page.pushOperators(setCharacterSpacing(ls), setCharacterSqueeze(sx * 100));
+        try {
+          page.drawText(t, { x: anchor[0], y: anchor[1], size: o.size, font, color, opacity: o.opacity, rotate: degrees(rotateDeg) });
+        } finally {
+          if (spaced) page.pushOperators(setCharacterSpacing(0), setCharacterSqueeze(100));
+        }
+      };
       try {
         if (unicodeFont) draw(unicodeFont, text);
         else draw(stdFont, sanitizeWinAnsi(text));
@@ -502,13 +523,13 @@ export class Baker {
         } catch {
           /* keep the estimate */
         }
-        drawAt(o.x - markerGap - mw, baselineY, marker);
+        drawAt(o.x - markerGap - mw, baselineY, marker, true);
         if (raw) {
-          const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size);
+          const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size, ls, sx);
           drawAt(x0, baselineY, raw);
         }
       } else if (raw) {
-        const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size);
+        const x0 = lineX(o.x, o.width, raw, o.align, measureFont, o.size, ls, sx);
         drawAt(x0, baselineY, raw);
       }
     }
@@ -538,10 +559,25 @@ interface TextBlockOptions {
   list?: 'none' | 'bullet' | 'number';
   /** clip lines that don't fit the box height (fixed-height callouts; off for text). */
   clip?: boolean;
+  /** extra spacing between characters in points (unstretched; PDF Tc) */
+  letterSpacing?: number;
+  /** horizontal glyph stretch factor (PDF Tz / 100) */
+  stretchX?: number;
 }
 
-/** Left edge of a line given alignment, measured with the active font. */
-function lineX(x: number, width: number, line: string, align: 'left' | 'center' | 'right', font: PDFFont, size: number): number {
+/** Left edge of a line given alignment, measured with the active font — including
+ *  tracking (spacing between the N−1 character joints) and horizontal stretch, so
+ *  centred/right-aligned spaced text lands exactly where the editor shows it. */
+function lineX(
+  x: number,
+  width: number,
+  line: string,
+  align: 'left' | 'center' | 'right',
+  font: PDFFont,
+  size: number,
+  letterSpacing = 0,
+  stretchX = 1,
+): number {
   if (align === 'left') return x;
   let textWidth: number;
   try {
@@ -549,6 +585,7 @@ function lineX(x: number, width: number, line: string, align: 'left' | 'center' 
   } catch {
     return x; // measurement failed → fall back to left alignment
   }
+  textWidth = (textWidth + letterSpacing * Math.max(0, [...line].length - 1)) * stretchX;
   return align === 'center' ? x + (width - textWidth) / 2 : x + width - textWidth;
 }
 

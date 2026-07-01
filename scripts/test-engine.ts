@@ -13,7 +13,8 @@ import { cssStackFor, fontDef, DEFAULT_FONT_KEY, baseFamilyOf, matchCatalogFontK
 import { classifyFont, prettyFontName, firstBaselineOffset } from '../src/lib/pdf/fonts.ts';
 import { shapeOutline, isStrokeOnlyShape } from '../src/lib/pdf/shapes.ts';
 import { registerEmbeddedFont, getEmbeddedFont, embeddedFontFamily } from '../src/lib/pdf/embeddedFonts.ts';
-import type { AnyElement, ShapeKind } from '../src/lib/pdf/types.ts';
+import { groupRunsIntoLines, detrackText } from '../src/lib/pdf/textRuns.ts';
+import type { AnyElement, ShapeKind, TextRun } from '../src/lib/pdf/types.ts';
 import fs from 'node:fs';
 
 let passed = 0;
@@ -500,6 +501,73 @@ async function run(): Promise<void> {
     ok('document with every shape kind still loads', reread.getPageCount() === 1);
     const text = await extractText(out);
     ok('original page content survives the shapes', text[0].includes('SHP'));
+  }
+
+  // ── tracked/spaced text: detection (scan) + Tc/Tz bake (export) ──
+  console.log('\ntracked & stretched text (Sperrsatz-Imitation)');
+  {
+    // Pseudo-spaced strings collapse to their real characters; normal text is untouched.
+    const t1 = detrackText('B U S I N E S S P L A N');
+    ok('fake-space heading collapses', t1.tracked && t1.text === 'BUSINESSPLAN', JSON.stringify(t1));
+    const t2 = detrackText('M E I N  P L A N'); // double space = real word break
+    ok('double space stays a word break', t2.tracked && t2.text === 'MEIN PLAN', JSON.stringify(t2));
+    const t3 = detrackText('Anhang A und B');
+    ok('normal text untouched', !t3.tracked && t3.text === 'Anhang A und B');
+
+    // Single-character pieces with uniform gaps merge WITHOUT fake spaces and carry
+    // the median gap as letterSpacing (letter width 6, gap 2 → spacing 2).
+    const mk = (str: string, x: number, y: number, w: number, fontSize: number): TextRun => ({
+      str, x, y, width: w, height: fontSize * 1.18, fontSize, family: 'helvetica',
+      bold: true, italic: false, fontName: 'g_d0_f1', stretchX: 1,
+    });
+    const pieces: TextRun[] = [];
+    let px = 50;
+    for (const ch of 'BUSINESSPLAN') {
+      pieces.push(mk(ch, px, 100, 6, 9));
+      px += 8;
+    }
+    const lines = groupRunsIntoLines(pieces);
+    ok('tracked pieces join to one line without fake spaces', lines.length === 1 && lines[0].str === 'BUSINESSPLAN', JSON.stringify(lines.map((l) => l.str)));
+    ok('median gap becomes letterSpacing', approx(lines[0].letterSpacing ?? 0, 2), String(lines[0].letterSpacing));
+    ok('line width spans all pieces', approx(lines[0].width, 12 * 6 + 11 * 2));
+
+    // Ordinary words still merge with a real space and no letterSpacing.
+    const words = groupRunsIntoLines([mk('Hallo', 50, 200, 30, 12), mk('Welt', 85, 200, 26, 12)]);
+    ok('normal words keep their space', words.length === 1 && words[0].str === 'Hallo Welt', JSON.stringify(words.map((l) => l.str)));
+    ok('no letterSpacing on normal text', words[0].letterSpacing === undefined);
+
+    // A clearly larger gap inside a tracked line stays a real word break.
+    const two: TextRun[] = [];
+    px = 50;
+    for (const ch of 'MEIN') { two.push(mk(ch, px, 300, 6, 9)); px += 8; }
+    px += 4; // word gap 6 = 3× letter gap
+    for (const ch of 'PLAN') { two.push(mk(ch, px, 300, 6, 9)); px += 8; }
+    const twoLines = groupRunsIntoLines(two);
+    ok('tracked words keep ONE real space', twoLines.length === 1 && twoLines[0].str === 'MEIN PLAN', JSON.stringify(twoLines.map((l) => l.str)));
+
+    // Export: letterSpacing/stretchX bake as native Tc/Tz and read back wider —
+    // and the text state is reset afterwards so the next element stays untouched.
+    const src = await PDFDocument.load(await makeSamplePdf(['TRK']));
+    const spacedEls: AnyElement[] = [
+      { id: 'a', type: 'text', x: 40, y: 60, width: 200, height: 14, opacity: 1, z: 1,
+        text: 'WIDE', family: 'sans', size: 9, bold: false, italic: false,
+        color: '#000000', align: 'left', lineHeight: 1.2, letterSpacing: 3, stretchX: 1 },
+      { id: 'b', type: 'text', x: 40, y: 90, width: 200, height: 14, opacity: 1, z: 2,
+        text: 'WIDE', family: 'sans', size: 9, bold: false, italic: false,
+        color: '#000000', align: 'left', lineHeight: 1.2 },
+    ];
+    const out = await exportInPlace(src, [{ sourceKey: 'main', sourceIndex: 0, addedRotation: 0, elements: spacedEls }], {});
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const doc = await pdfjs.getDocument({ data: out.slice(), isEvalSupported: false, useSystemFonts: true }).promise;
+    const page = await doc.getPage(1);
+    const content = await page.getTextContent();
+    const items = content.items as { str: string; width: number }[];
+    const wide = items.filter((i) => i.str.replace(/ /g, '') === 'WIDE');
+    ok('both spaced and plain element read back', wide.length === 2, JSON.stringify(items.map((i) => i.str)));
+    if (wide.length === 2) {
+      // Tc=3 over 3 joints → +9pt on the spaced one; the plain one keeps natural width.
+      ok('Tc applied to the spaced element and reset after it', Math.abs(wide[0].width - wide[1].width - 9) < 2, `w0=${wide[0].width} w1=${wide[1].width}`);
+    }
   }
 
   console.log(`\n\x1b[1mResult:\x1b[0m \x1b[32m${passed} passed\x1b[0m, ${failed ? `\x1b[31m${failed} failed\x1b[0m` : '0 failed'}\n`);

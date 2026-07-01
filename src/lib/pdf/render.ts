@@ -201,6 +201,15 @@ export async function extractTextRuns(page: PDFPageProxy, rotation: number): Pro
     const x = m[4];
     const baselineY = m[5];
 
+    // Horizontal glyph stretch (PDF Tz / an anisotropic text matrix): the ratio of the
+    // matrix's x-scale to its y-scale. pdf.js folds Tz into the transform's first
+    // column, so this catches both ways a PDF can distort text. Tiny deviations are
+    // measurement noise, not a style — treat them as undistorted.
+    const scaleX = Math.hypot(m[0], m[1]);
+    let stretchX = scaleX > 0 && fontSize > 0 ? scaleX / fontSize : 1;
+    if (!Number.isFinite(stretchX) || Math.abs(stretchX - 1) < 0.02) stretchX = 1;
+    stretchX = Math.min(4, Math.max(0.25, stretchX));
+
     const styleFamily = content.styles?.[item.fontName]?.fontFamily as string | undefined;
     const rawName = styleFamily ?? item.fontName;
     const { family: baseFamily, bold, italic } = classifyFont(rawName);
@@ -225,6 +234,7 @@ export async function extractTextRuns(page: PDFPageProxy, rotation: number): Pro
       family,
       bold,
       italic,
+      stretchX,
       fontName: item.fontName,
       // Readable typeface name shown in the scan editor's font panel. A catalogue
       // match gives the canonical label (so a generic "sans-serif" never appears in
@@ -234,50 +244,4 @@ export async function extractTextRuns(page: PDFPageProxy, rotation: number): Pro
   }
 
   return runs;
-}
-
-/**
- * Merge raw character runs into editable *line blocks*. pdf.js emits many short
- * runs per visual line; the scan editor is far nicer when a whole line (or form
- * field) is one click target. Runs are grouped when they share a baseline AND are
- * horizontally adjacent — a large gap starts a new block so separate columns or
- * form fields stay independent.
- */
-export function groupRunsIntoLines(runs: TextRun[]): TextRun[] {
-  if (runs.length <= 1) return runs;
-  const baseline = (r: TextRun) => r.y + r.fontSize;
-  const sorted = [...runs].sort((a, b) => {
-    const db = baseline(a) - baseline(b);
-    if (Math.abs(db) > Math.min(a.fontSize, b.fontSize) * 0.5) return db;
-    return a.x - b.x;
-  });
-
-  const lines: TextRun[] = [];
-  let cur: TextRun | null = null;
-  let curRight = 0;
-
-  for (const r of sorted) {
-    const sameLine =
-      cur &&
-      Math.abs(baseline(r) - baseline(cur)) <= Math.min(r.fontSize, cur.fontSize) * 0.5 &&
-      r.x - curRight <= cur.fontSize * 2.2;
-
-    if (cur && sameLine) {
-      const gap = r.x - curRight;
-      const needsSpace = gap > cur.fontSize * 0.18 && !cur.str.endsWith(' ') && !r.str.startsWith(' ');
-      cur.str += (needsSpace ? ' ' : '') + r.str;
-      const top = Math.min(cur.y, r.y);
-      const bottom = Math.max(cur.y + cur.height, r.y + r.height);
-      cur.y = top;
-      cur.height = bottom - top;
-      cur.width = Math.max(curRight, r.x + r.width) - cur.x;
-      cur.fontSize = Math.max(cur.fontSize, r.fontSize);
-      curRight = r.x + r.width;
-    } else {
-      cur = { ...r };
-      lines.push(cur);
-      curRight = r.x + r.width;
-    }
-  }
-  return lines;
 }

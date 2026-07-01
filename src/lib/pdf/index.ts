@@ -50,9 +50,9 @@ export {
   renderPageRegion,
   extractTextRuns,
   inspectFonts,
-  groupRunsIntoLines,
   totalRotation,
   pageViewSize,
 } from './render';
+export { groupRunsIntoLines, detrackText } from './textRuns';
 export type { PDFDocumentProxy, PDFPageProxy, FontInspection } from './render';
 export * from './types';

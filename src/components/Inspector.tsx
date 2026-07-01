@@ -637,6 +637,8 @@ function TextProps({ el, set, commit }: { el: TextElement; set: (p: ElementPatch
       lineHeight: el.lineHeight,
       embeddedFontId: el.embeddedFontId,
       fontLabel: el.fontLabel,
+      letterSpacing: el.letterSpacing,
+      stretchX: el.stretchX,
     });
     setTool('text');
     showToast('Klicke auf die Stelle, an der der Text eingefügt werden soll', 'info');
@@ -698,6 +700,25 @@ function TextProps({ el, set, commit }: { el: TextElement; set: (p: ElementPatch
             <AlignRight size={15} />
           </button>
         </div>
+      </Row>
+      <Row>
+        <label>Laufweite</label>
+        <NumField
+          value={Math.round((el.letterSpacing ?? 0) * 10) / 10}
+          min={-5}
+          max={100}
+          step={0.1}
+          title="Zusätzlicher Abstand zwischen den Buchstaben (pt) – z. B. für gesperrte Überschriften wie B U S I N E S S P L A N"
+          onValue={(n) => {
+            // Grow/shrink the box together with the spacing so the text never clips.
+            const prev = el.letterSpacing ?? 0;
+            const chars = Math.max(1, ...el.text.split('\n').map((l) => [...l].length));
+            const sx = el.stretchX ?? 1;
+            set({ letterSpacing: n || undefined, width: Math.max(8, el.width + (n - prev) * chars * sx) }, false);
+          }}
+          onBeforeChange={commit}
+        />
+        <span className="insp-val">pt</span>
       </Row>
       <Row>
         <label>Liste</label>

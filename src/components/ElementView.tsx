@@ -345,13 +345,16 @@ function ElementBody({
   // Size the box to hug its content exactly (text never wraps, so the on-screen line
   // matches the export, which also doesn't wrap): it grows while typing AND shrinks
   // back when text is deleted, instead of keeping the widest size it ever had.
+  // scrollWidth is measured BEFORE the scaleX() stretch transform, so a stretched
+  // text's visual box is the measured width times its stretch factor.
   const contentBox = (ta: HTMLTextAreaElement): { width: number; height: number } => {
     const t = el as TextElement | CalloutElement;
+    const sx = t.type === 'text' ? (t as TextElement).stretchX ?? 1 : 1;
     const { w, h } = measureContent(ta);
     const minW = Math.max(12, t.size * 0.6);
     const minH = t.size * t.lineHeight;
     return {
-      width: Math.max(minW, Math.round(((w + 2) / scale) * 100) / 100), // +2px caret room
+      width: Math.max(minW, Math.round((((w + 2) * sx) / scale) * 100) / 100), // +2px caret room
       height: Math.max(minH, Math.round((h / scale) * 100) / 100),
     };
   };
@@ -376,6 +379,7 @@ function ElementBody({
   switch (el.type) {
     case 'text': {
       const t = el as TextElement;
+      const sx = t.stretchX ?? 1;
       const textStyle: React.CSSProperties = {
         // One face rule for field, editor and markers: the captured original typeface
         // verbatim (no faux bold/italic over an already-styled program), else the chosen
@@ -385,6 +389,11 @@ function ElementBody({
         color: t.color,
         textAlign: t.align,
         lineHeight: t.lineHeight,
+        // Detected/chosen tracking: spacing follows each character (CSS), stretch is
+        // a scaleX() on top — the same model the export writes as Tc under Tz, so a
+        // spaced heading like "B U S I N E S S P L A N" is imitated exactly.
+        letterSpacing: t.letterSpacing ? `${t.letterSpacing * scale}px` : undefined,
+        ...(sx !== 1 ? { width: `${100 / sx}%`, transform: `scaleX(${sx})`, transformOrigin: '0 0' } : {}),
         // NOTE: when this text replaces existing PDF text (coverColor/coverRect), the
         // background cover is painted by PageCanvas as a page-anchored layer *under*
         // this element — never as a CSS background here, since the cover must not

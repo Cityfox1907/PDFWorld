@@ -20,19 +20,32 @@ export function Workspace() {
   const currentPageId = useStore((s) => s.currentPageId);
   const deleteElement = useStore((s) => s.deleteElement);
   const deleteElements = useStore((s) => s.deleteElements);
-  const duplicateElement = useStore((s) => s.duplicateElement);
-  const copyElement = useStore((s) => s.copyElement);
-  const pasteElement = useStore((s) => s.pasteElement);
+  const duplicateElements = useStore((s) => s.duplicateElements);
+  const copyElements = useStore((s) => s.copyElements);
+  const pasteClipboard = useStore((s) => s.pasteClipboard);
+  const selectElement = useStore((s) => s.selectElement);
   const openSaveDialog = useUI((s) => s.openSaveDialog);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // While a modal editor owns the keyboard, suspend global shortcuts so e.g. undo
-      // can't mutate the page underneath the open image editor.
-      if (useStore.getState().imageEditor || useUI.getState().signatureOpen) return;
+      // While a modal owns the keyboard, suspend global shortcuts entirely — otherwise
+      // Delete removes an element behind the organizer, tool hotkeys switch tools under
+      // the save dialog, and undo mutates the page below the image editor.
+      const ui = useUI.getState();
+      if (useStore.getState().imageEditor || ui.signatureOpen || ui.saveDialogOpen || ui.organizerOpen) return;
       const t = e.target as HTMLElement;
       const typing = t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName);
       const mod = e.metaKey || e.ctrlKey;
+
+      // Save always works — it never conflicts with text editing.
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        openSaveDialog();
+        return;
+      }
+      // While typing, the browser's own editing shortcuts (incl. its Cmd+Z text undo)
+      // must win — a document-wide undo mid-sentence would silently revert real edits.
+      if (typing) return;
 
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -45,43 +58,43 @@ export function Workspace() {
         redo();
         return;
       }
-      if (mod && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        openSaveDialog();
-        return;
-      }
-      if (typing) return;
-      // Element clipboard / duplicate (only outside text inputs, so editing keeps the
-      // browser's own copy/paste). Cut = copy + remove.
+      // Element clipboard / duplicate — all honour the full multi-selection, exactly
+      // like Delete does. Cut = copy + remove.
+      const selIds = useStore.getState().selectedElementIds;
       if (mod && currentPageId) {
         const k = e.key.toLowerCase();
-        if (k === 'c' && selectedElementId) {
+        if (k === 'c' && selIds.length) {
           e.preventDefault();
-          copyElement(currentPageId, selectedElementId);
+          copyElements(currentPageId, selIds);
           return;
         }
-        if (k === 'x' && selectedElementId) {
+        if (k === 'x' && selIds.length) {
           e.preventDefault();
-          copyElement(currentPageId, selectedElementId);
-          deleteElement(currentPageId, selectedElementId);
+          copyElements(currentPageId, selIds);
+          deleteElements(currentPageId, selIds);
           return;
         }
-        if (k === 'd' && selectedElementId) {
+        if (k === 'd' && selIds.length) {
           e.preventDefault();
-          duplicateElement(currentPageId, selectedElementId);
+          duplicateElements(currentPageId, selIds);
           return;
         }
         if (k === 'v') {
           e.preventDefault();
-          pasteElement(currentPageId);
+          pasteClipboard(currentPageId);
           return;
         }
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedElementId && currentPageId) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selIds.length && currentPageId) {
         e.preventDefault();
-        const ids = useStore.getState().selectedElementIds;
-        if (ids.length > 1) deleteElements(currentPageId, ids);
-        else deleteElement(currentPageId, selectedElementId);
+        if (selIds.length > 1) deleteElements(currentPageId, selIds);
+        else deleteElement(currentPageId, selIds[0]);
+        return;
+      }
+      // Escape: clear the selection first; with nothing selected, return to Auswählen.
+      if (e.key === 'Escape') {
+        if (selIds.length) selectElement(null);
+        else setTool('select');
         return;
       }
       const map: Record<string, Parameters<typeof setTool>[0]> = {
@@ -101,7 +114,7 @@ export function Workspace() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [undo, redo, setTool, selectedElementId, currentPageId, deleteElement, deleteElements, duplicateElement, copyElement, pasteElement, openSaveDialog]);
+  }, [undo, redo, setTool, selectedElementId, currentPageId, deleteElement, deleteElements, duplicateElements, copyElements, pasteClipboard, selectElement, openSaveDialog]);
 
   return (
     <div className="workspace">

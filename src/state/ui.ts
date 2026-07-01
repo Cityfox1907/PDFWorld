@@ -15,6 +15,10 @@ function readTheme(): Theme {
 export function applyTheme(theme: Theme): void {
   if (typeof document !== 'undefined') {
     document.documentElement.dataset.theme = theme;
+    // Keep the browser/PWA chrome tint in step (values mirror --bg-elevated/--bg).
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'dark' ? '#0e0f13' : '#f5f5f7');
   }
 }
 

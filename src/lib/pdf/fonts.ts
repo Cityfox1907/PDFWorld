@@ -26,6 +26,23 @@ export function firstBaselineOffset(size: number, lineHeight: number): number {
 }
 
 /**
+ * Line height used for text created by the scan tool's in-place editing. One shared
+ * constant keeps the transient run editor, the created element and the export on the
+ * exact same baseline.
+ */
+export const SCAN_LINE_HEIGHT = 1.2;
+
+/**
+ * How far a replacing text element's background cover extends past its cover region,
+ * in points. Anti-aliased fringes of the original glyphs (and slight metric drift of
+ * the extraction) would otherwise peek out around the edges. Shared by the editor
+ * (screen cover) and the bake layer (export) so both hide exactly the same area.
+ */
+export function coverInsets(size: number): { x: number; y: number } {
+  return { x: Math.max(1.5, size * 0.2), y: Math.max(1, size * 0.12) };
+}
+
+/**
  * Map a base family + style to one of the 14 PDF standard fonts.
  * The standard fonts are metric-similar to Arial/Times/Courier and cover the full
  * WinAnsi range (incl. German umlauts, ß and €), so they reproduce the vast majority

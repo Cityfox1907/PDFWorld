@@ -291,12 +291,12 @@ export function baseFamilyOf(key: string): BaseFamily {
  * family — so the panel name and the typeface actually used never disagree.
  */
 const FONT_ALIASES: Record<string, string> = {
-  // Arial & metric clones
+  // Arial & metric clones. Deliberately NOT aliased: Arial Narrow / Arial Black —
+  // their metrics differ substantially from Arial, so claiming "Arial" would make
+  // replaced text run visibly wider/narrower than the original glyphs.
   arialmt: 'arial',
   arial: 'arial',
-  arialnarrow: 'arial',
-  arialblack: 'arial',
-  ariaunicodems: 'arial',
+  arialunicodems: 'arial',
   liberationsans: 'arial',
   nimbussans: 'arial',
   nimbussansl: 'arial',
@@ -334,13 +334,9 @@ const FONT_ALIASES: Record<string, string> = {
   georgia: 'georgia',
   gelasio: 'gelasio',
   verdana: 'verdana',
-  dejavusans: 'verdana',
   tahoma: 'tahoma',
   garamond: 'garamond',
   ebgaramond: 'eb-garamond',
-  bookantiqua: 'georgia',
-  palatino: 'georgia',
-  palatinolinotype: 'georgia',
   // popular web faces whose PostScript name compacts differently from the label
   robotocondensed: 'roboto-condensed',
   ptsans: 'pt-sans',
@@ -364,11 +360,13 @@ for (const f of FONT_CATALOG) {
 
 /**
  * Trailing weight/style/foundry tokens that aren't part of a family's identity.
- * Stripped one at a time (longest-first) with an exact re-check after each strip,
- * so "Arial-BoldMT" → "arial" and "Roboto-Medium" → "roboto" while a real name
- * like "timesnewroman" is never eroded (we only ever require an *exact* match).
+ * Stripped one at a time with an exact re-check after each strip, so "Arial-BoldMT"
+ * → "arial" and "Roboto-Medium" → "roboto" while a real name like "timesnewroman"
+ * is never eroded (we only ever require an *exact* match). MUST be tried
+ * longest-first — the sort below guarantees it — otherwise "…semibold" loses only
+ * its "bold" tail and the leftover "…semi" never matches anything.
  */
-const TRAILING_TOKENS = ['psmt', 'mt', 'ps', 'bolditalic', 'boldoblique', 'semibolditalic', 'italic', 'oblique', 'bold', 'semibold', 'demibold', 'demi', 'extrabold', 'ultrabold', 'heavy', 'black', 'medium', 'light', 'extralight', 'ultralight', 'thin', 'hairline', 'regular', 'normal'];
+const TRAILING_TOKENS = ['psmt', 'mt', 'ps', 'bolditalic', 'boldoblique', 'semibolditalic', 'italic', 'oblique', 'bold', 'semibold', 'demibold', 'demi', 'extrabold', 'ultrabold', 'heavy', 'black', 'medium', 'light', 'extralight', 'ultralight', 'thin', 'hairline', 'regular', 'normal'].sort((a, b) => b.length - a.length);
 
 /**
  * Resolve a raw PDF/CSS font name to a specific catalogue key (e.g. "ArialMT" →
@@ -428,15 +426,31 @@ export function resolveFamilyKey(rawName: string | undefined | null): FontFamily
  *     pdf.js placeholder) → "Unbekannt", since we can't reproduce it faithfully.
  */
 export function fontDisplayName(rawName: string | undefined | null, embedded: boolean): string {
+  // Generic CSS families first: a bare "serif"/"sans-serif" from pdf.js is a fallback
+  // marker, not a font identity — it must read as the friendly "Serif"/"Sans-Serif",
+  // never as the standard catalogue entry "Serif (Times)" the compact map would hit.
+  if (isGenericFontLabel(rawName)) return prettyFontName(rawName);
   const key = matchCatalogFontKey(rawName);
   if (key) return fontDef(key).label;
-  if (isGenericFontLabel(rawName)) return prettyFontName(rawName); // "Sans-Serif", "Serif", …
   if (isInternalFontName(rawName)) return 'Unbekannt';
   const pretty = prettyFontName(rawName);
   if (!pretty || pretty === 'Unbekannt') return 'Unbekannt';
   // A specific, real face: only claim it when we can actually reproduce it (the PDF
   // embeds the original); otherwise we'd show one font and write another.
   return embedded ? pretty : 'Unbekannt';
+}
+
+/**
+ * Whether a family can be written with a REAL bold / italic face on export. Web fonts
+ * that ship only one weight (or no italics) would render faux-bold/italic on screen
+ * but flatten to the plain face in the saved PDF — the UI disables those toggles so
+ * screen and export never disagree. System and standard families always map to the
+ * PDF standard fonts, which ship true bold/italic faces.
+ */
+export function fontCapabilities(key: string): { bold: boolean; italic: boolean } {
+  const f = fontDef(key);
+  if (!f.web) return { bold: true, italic: true };
+  return { bold: f.web.weights.some((w) => w >= 600), italic: f.web.italic };
 }
 
 /** CSS font-family stack for previewing a font on screen (real font + system fallback). */

@@ -70,6 +70,9 @@ export interface ToolDefaults {
   shapeKind: ShapeKind;
   /** region tool ("Ausschneiden") shape: a rectangle marquee or a freehand lasso */
   cutMode: 'rect' | 'lasso';
+  /** region tool action: 'cut' covers the source area with the page background so the
+   *  piece really moves away; 'copy' leaves the original visible (duplicate) */
+  cutAction: 'cut' | 'copy';
   /** background brush shape: a freehand stroke, or a borderless filled rectangle */
   brushMode: 'brush' | 'rect';
   /** width of the background cover brush, in view points */
@@ -137,8 +140,8 @@ interface StoreState {
   /** Recently used / sampled colours, newest first — shared by every colour picker
    *  so a tone picked with the brush (or eyedropper) is reusable in new text. */
   recentColors: string[];
-  /** A single copied element kept for paste (Cmd/Ctrl+C → V), across pages. */
-  clipboard: AnyElement | null;
+  /** Copied elements kept for paste (Cmd/Ctrl+C → V), across pages. */
+  clipboard: AnyElement[];
   /** A typeface armed from the scan panel; the next click places a field in it. */
   pendingTextStyle: PendingTextStyle | null;
   /** Open image editor (crop), targeting an image element. */
@@ -188,11 +191,13 @@ interface StoreState {
   /** Delete several elements in ONE history step (multi-selection). */
   deleteElements: (pageId: string, ids: string[]) => void;
   duplicateElement: (pageId: string, id: string) => void;
+  /** Duplicate several elements in ONE history step (multi-selection). */
+  duplicateElements: (pageId: string, ids: string[]) => void;
   reorderElement: (pageId: string, id: string, dir: 'front' | 'back') => void;
-  /** Copy the selected element to the in-app clipboard (no history change). */
-  copyElement: (pageId: string, id: string) => void;
-  /** Paste the clipboard element onto a page (slightly offset, selected). */
-  pasteElement: (pageId: string) => void;
+  /** Copy the selected element(s) to the in-app clipboard (no history change). */
+  copyElements: (pageId: string, ids: string[]) => void;
+  /** Paste the clipboard elements onto a page (slightly offset, selected). */
+  pasteClipboard: (pageId: string) => void;
 
   // ── pages ──
   reorderPages: (fromIndex: number, toIndex: number) => void;
@@ -241,6 +246,7 @@ const DEFAULT_TOOL: ToolDefaults = {
   shapeStroke: '#111111',
   shapeKind: 'triangle',
   cutMode: 'rect',
+  cutAction: 'cut',
   brushMode: 'brush',
   brushWidth: 18,
   brushColor: '#ffffff',
@@ -255,6 +261,35 @@ function visibleSize(p: EditorPage): { width: number; height: number } {
 
 function clonePages(pages: EditorPage[]): EditorPage[] {
   return structuredClone(pages);
+}
+
+/**
+ * A duplicated or pasted element must never inherit the page-anchored replacement
+ * state of its source (scan tool): the copy is a free text box, not a second cover
+ * over the same original line — otherwise deleting the original edit would still
+ * leave the copy's invisible cover hiding the PDF text underneath.
+ */
+export function stripReplacement(el: AnyElement): AnyElement {
+  if (el.type !== 'text' || (!el.coverColor && !el.replacesRun)) return el;
+  const t = { ...el };
+  delete t.coverColor;
+  delete t.coverRect;
+  delete t.replacesRun;
+  return t;
+}
+
+/**
+ * Deep copy of an element shifted by (dx, dy) — the base for duplicate & paste.
+ * Ink points are absolute view-points, so they must shift WITH the box; otherwise the
+ * copy's stroke stays glued to the original's position (and exports there) while its
+ * selection box sits at the new one.
+ */
+function offsetCopy(el: AnyElement, dx: number, dy: number): AnyElement {
+  const c = stripReplacement(structuredClone(el));
+  c.x += dx;
+  c.y += dy;
+  if (c.type === 'ink') c.points = c.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+  return c;
 }
 
 function snapshot(s: StoreState): Snapshot {
@@ -291,7 +326,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   tool: { ...DEFAULT_TOOL },
   recentColors: [],
-  clipboard: null,
+  clipboard: [],
   pendingTextStyle: null,
   imageEditor: null,
 
@@ -549,21 +584,35 @@ export const useStore = create<StoreState>((set, get) => ({
     const el = page?.elements.find((e) => e.id === id);
     if (!el) return;
     // A duplicate is always free to move, even if the original was locked.
-    const copy = { ...structuredClone(el), id: uid('el'), x: el.x + 12, y: el.y + 12, z: maxZ(page!.elements) + 1, locked: false };
+    const copy = { ...offsetCopy(el, 12, 12), id: uid('el'), z: maxZ(page!.elements) + 1, locked: false };
     get().addElement(pageId, copy);
   },
-  copyElement(pageId, id) {
-    const page = get().pages.find((p) => p.id === pageId);
-    const el = page?.elements.find((e) => e.id === id);
-    if (el) set({ clipboard: structuredClone(el) });
-  },
-  pasteElement(pageId) {
-    const { clipboard } = get();
-    if (!clipboard) return;
+  duplicateElements(pageId, ids) {
     const page = get().pages.find((p) => p.id === pageId);
     if (!page) return;
-    const copy = { ...structuredClone(clipboard), id: uid('el'), x: clipboard.x + 14, y: clipboard.y + 14, z: maxZ(page.elements) + 1, locked: false };
-    get().addElement(pageId, copy);
+    const idSet = new Set(ids);
+    const chosen = page.elements.filter((e) => idSet.has(e.id));
+    if (!chosen.length) return;
+    const zTop = maxZ(page.elements);
+    const copies = chosen.map((e, i) => ({ ...offsetCopy(e, 12, 12), id: uid('el'), z: zTop + 1 + i, locked: false }) as AnyElement);
+    get().addElements(pageId, copies);
+    get().selectElements(copies.map((c) => c.id));
+  },
+  copyElements(pageId, ids) {
+    const page = get().pages.find((p) => p.id === pageId);
+    if (!page) return;
+    const idSet = new Set(ids);
+    const els = page.elements.filter((e) => idSet.has(e.id)).map((e) => structuredClone(e));
+    if (els.length) set({ clipboard: els });
+  },
+  pasteClipboard(pageId) {
+    const { clipboard } = get();
+    const page = get().pages.find((p) => p.id === pageId);
+    if (!clipboard.length || !page) return;
+    const zTop = maxZ(page.elements);
+    const copies = clipboard.map((c, i) => ({ ...offsetCopy(c, 14, 14), id: uid('el'), z: zTop + 1 + i, locked: false }) as AnyElement);
+    get().addElements(pageId, copies);
+    get().selectElements(copies.map((c) => c.id));
   },
   reorderElement(pageId, id, dir) {
     get().commit();

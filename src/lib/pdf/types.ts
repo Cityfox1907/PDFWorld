@@ -110,6 +110,18 @@ export interface TextElement extends BaseElement {
    */
   coverColor?: string;
   /**
+   * The page region the cover paints over, in absolute view-points. It is anchored to
+   * the PAGE (the original glyphs it hides), never to the text box: moving, shrinking
+   * or rotating the replacement text must not let the original line peek out again.
+   * Absent (legacy) means the element's own box.
+   */
+  coverRect?: { x: number; y: number; width: number; height: number };
+  /**
+   * Identity of the scanned line this element replaced (scan tool, in-place edit),
+   * so the line's clickable scan box never re-appears once it has been rewritten.
+   */
+  replacesRun?: string;
+  /**
    * Optional id of an extracted embedded font (see fonts.ts FontStore). When present
    * the bake layer embeds the *original* font so the replacement matches exactly.
    */

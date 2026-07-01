@@ -7,6 +7,8 @@ import { Undo2, Redo2, ZoomIn, ZoomOut, Download, FilePlus2, FolderOpen, Loader2
 export function TopBar() {
   const fileName = useStore((s) => s.fileName);
   const zoom = useStore((s) => s.zoom);
+  const minZoom = useStore((s) => s.minZoom);
+  const maxZoom = useStore((s) => s.maxZoom);
   const setZoom = useStore((s) => s.setZoom);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
@@ -57,13 +59,13 @@ export function TopBar() {
           </button>
         </div>
         <div className="seg">
-          <button className="seg-btn" onClick={() => zoomBy(1 / 1.25)} title="Verkleinern" disabled={zoom <= 0.25}>
+          <button className="seg-btn" onClick={() => zoomBy(1 / 1.25)} title="Verkleinern" disabled={zoom <= minZoom}>
             <ZoomOut size={16} />
           </button>
           <button className="seg-btn zoom-label" onClick={resetZoom} title="Zoom zurücksetzen (100 %)">
             {Math.round(zoom * 100)}%
           </button>
-          <button className="seg-btn" onClick={() => zoomBy(1.25)} title="Vergrössern (bis 2000 %)" disabled={zoom >= 20}>
+          <button className="seg-btn" onClick={() => zoomBy(1.25)} title="Vergrössern (bis 2000 %)" disabled={zoom >= maxZoom}>
             <ZoomIn size={16} />
           </button>
         </div>

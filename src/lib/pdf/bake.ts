@@ -10,7 +10,7 @@ import {
   BlendMode,
 } from 'pdf-lib';
 import type { AnyElement, TextElement, RectElement, EllipseElement, ShapeElement, CalloutElement, HighlightElement, ImageElement, InkElement, FontFamilyKey } from './types';
-import { standardFontFor, firstBaselineOffset } from './fonts';
+import { standardFontFor, firstBaselineOffset, coverInsets } from './fonts';
 import { baseFamilyOf, fontFileUrl } from './fontCatalog';
 import { getEmbeddedFont } from './embeddedFonts';
 import { shapeOutline, isStrokeOnlyShape, calloutOutline, calloutTailHeight, CALLOUT_PAD, type Pt } from './shapes';
@@ -394,17 +394,22 @@ export class Baker {
   }
 
   private async drawText(page: PDFPage, el: TextElement, toPdfPoint: ToPdfPoint): Promise<void> {
-    // 1) Hide the original glyphs when this edit replaces existing PDF text.
+    // 1) Hide the original glyphs when this edit replaces existing PDF text. The cover
+    //    is PAGE-anchored (coverRect): it stays over the original line even when the
+    //    replacement box was moved, shrunk or rotated afterwards — and it is inflated
+    //    by the shared insets so anti-aliased glyph fringes never peek out. Mirrors
+    //    the editor's on-screen cover exactly (see PageCanvas CoverLayer).
     if (el.coverColor) {
-      const cover = this.placeEl(el, toPdfPoint);
-      page.drawRectangle({
-        x: cover.x,
-        y: cover.y,
-        width: cover.width,
-        height: cover.height,
-        rotate: degrees(cover.rotateDeg),
-        color: rgbColor(el.coverColor),
-      });
+      const pad = coverInsets(el.size);
+      const r = el.coverRect ?? { x: el.x, y: el.y, width: el.width, height: el.height };
+      const corners: Pt[] = [
+        { x: r.x - pad.x, y: r.y - pad.y },
+        { x: r.x + r.width + pad.x, y: r.y - pad.y },
+        { x: r.x + r.width + pad.x, y: r.y + r.height + pad.y },
+        { x: r.x - pad.x, y: r.y + r.height + pad.y },
+      ];
+      const d = this.pathFromPoints(corners, true, 0, 0, 0, toPdfPoint);
+      page.drawSvgPath(d, { x: 0, y: 0, color: rgbColor(el.coverColor) });
     }
     await this.bakeTextBlock(page, toPdfPoint, {
       x: el.x,

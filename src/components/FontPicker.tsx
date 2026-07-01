@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FONT_CATALOG, cssStackFor, fontDef, type FontFamilyKey, type FontDef } from '../lib/pdf';
 import { ChevronDown, Check, Search } from 'lucide-react';
 
@@ -46,6 +47,7 @@ export function FontPicker({
   const [query, setQuery] = useState('');
   const [pos, setPos] = useState<PopPos | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const current = fontDef(value);
   const triggerLabel = displayLabel ?? current.label;
@@ -78,10 +80,19 @@ export function FontPicker({
     if (open) place();
   }, [open, place]);
 
+  // A closed picker always starts fresh: without this, an outside-click/Escape close
+  // kept the old query, and reopening showed a mysteriously filtered list.
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      // The popover lives in a body portal, so check both the trigger and the pop.
+      if (rootRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
@@ -127,45 +138,50 @@ export function FontPicker({
         <ChevronDown size={15} className="font-picker-chevron" />
       </button>
 
-      {open && pos && (
-        <div
-          className="font-picker-pop"
-          style={{ left: pos.left, top: pos.top, width: pos.width, maxHeight: pos.maxHeight }}
-        >
-          <div className="font-picker-search">
-            <Search size={14} />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Schrift suchen…"
-            />
-          </div>
-          <div className="font-picker-list">
-            {groups.map(({ group, fonts }) => (
-              <div key={group}>
-                <div className="font-picker-group">{GROUP_LABEL[group]}</div>
-                {fonts.map((f) => {
-                  const active = !overriding && f.key === value;
-                  return (
-                    <button
-                      key={f.key}
-                      type="button"
-                      className={`font-picker-item ${active ? 'active' : ''}`}
-                      style={{ fontFamily: cssStackFor(f.key) }}
-                      onClick={() => select(f.key)}
-                    >
-                      <span className="font-picker-item-name">{f.label}</span>
-                      {active && <Check size={14} />}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-            {groups.length === 0 && <div className="font-picker-empty">Keine Treffer</div>}
-          </div>
-        </div>
-      )}
+      {/* Body portal: escapes any transformed/overflow ancestor (inspector scroll,
+          mobile bottom sheets), so the popover always lands at its computed spot. */}
+      {open && pos &&
+        createPortal(
+          <div
+            ref={popRef}
+            className="font-picker-pop"
+            style={{ left: pos.left, top: pos.top, width: pos.width, maxHeight: pos.maxHeight }}
+          >
+            <div className="font-picker-search">
+              <Search size={14} />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Schrift suchen…"
+              />
+            </div>
+            <div className="font-picker-list">
+              {groups.map(({ group, fonts }) => (
+                <div key={group}>
+                  <div className="font-picker-group">{GROUP_LABEL[group]}</div>
+                  {fonts.map((f) => {
+                    const active = !overriding && f.key === value;
+                    return (
+                      <button
+                        key={f.key}
+                        type="button"
+                        className={`font-picker-item ${active ? 'active' : ''}`}
+                        style={{ fontFamily: cssStackFor(f.key) }}
+                        onClick={() => select(f.key)}
+                      >
+                        <span className="font-picker-item-name">{f.label}</span>
+                        {active && <Check size={14} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {groups.length === 0 && <div className="font-picker-empty">Keine Treffer</div>}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

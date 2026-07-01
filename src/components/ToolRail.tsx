@@ -63,10 +63,11 @@ interface ShapeChoice {
   shapeKind?: ShapeKind;
   icon: LucideIcon;
   label: string;
+  key?: string;
 }
 const SHAPES: ShapeChoice[] = [
-  { tool: 'rect', icon: Square, label: 'Rechteck' },
-  { tool: 'ellipse', icon: Circle, label: 'Ellipse' },
+  { tool: 'rect', icon: Square, label: 'Rechteck', key: 'R' },
+  { tool: 'ellipse', icon: Circle, label: 'Ellipse', key: 'O' },
   { tool: 'shape', shapeKind: 'triangle', icon: Triangle, label: 'Dreieck' },
   { tool: 'shape', shapeKind: 'right-triangle', icon: TriangleRight, label: 'Rechtw. Dreieck' },
   { tool: 'shape', shapeKind: 'diamond', icon: Diamond, label: 'Raute' },
@@ -135,7 +136,7 @@ function ElementsMenu() {
                   key={s.label}
                   className={`rail-flyout-item ${active ? 'active' : ''}`}
                   onClick={() => pick(s)}
-                  title={s.label}
+                  title={s.key ? `${s.label} · ${s.key}` : s.label}
                 >
                   <s.icon size={18} />
                   <span>{s.label}</span>
